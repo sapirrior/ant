@@ -1,22 +1,28 @@
 import type { Capability, Grants } from '../types/config.ts'
-import type { ParsedCliArgs } from './argv.ts'
 
-export function resolveGrants(args: Pick<ParsedCliArgs, 'allowRead' | 'allowEdit' | 'allowBash' | 'allowDestructiveBash'>): Grants {
+export interface GrantOptions {
+  readonly allowRead?: boolean
+  readonly allowEdit?: boolean
+  readonly allowBash?: boolean
+  readonly allowDestructiveBash?: boolean
+}
+
+export function resolveGrants(options: GrantOptions): Grants {
   const caps = new Set<Capability>()
 
-  if (args.allowRead || args.allowEdit) {
+  if (options.allowRead || options.allowEdit) {
     caps.add('fs.read')
   }
 
-  if (args.allowEdit) {
+  if (options.allowEdit) {
     caps.add('fs.write')
   }
 
-  if (args.allowBash || args.allowDestructiveBash) {
+  if (options.allowBash || options.allowDestructiveBash) {
     caps.add('shell.run')
   }
 
-  if (args.allowDestructiveBash) {
+  if (options.allowDestructiveBash) {
     caps.add('shell.destructive')
   }
 

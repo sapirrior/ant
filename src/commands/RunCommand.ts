@@ -1,6 +1,6 @@
 import { Command } from 'commander'
-import { readPipedStdin } from '../cli/stdin.ts'
-import { resolveGrants } from '../cli/grants.ts'
+import { readPipedStdin } from '../engine/stdin.ts'
+import { resolveGrants } from '../policy/grants.ts'
 import { Engine } from '../engine/engine.ts'
 import {
   loadSettings,
