@@ -25,14 +25,19 @@ function mapStatusToExitCode(status: Status): ExitCode {
   }
 }
 
-export async function runAgent({ config, messages, signal, onEvent }: ModelRunOptions): Promise<ModelOutcome> {
+export async function runAgent({ config, messages, signal, threadId, onCheckpoint, onEvent }: ModelRunOptions): Promise<ModelOutcome> {
   const { model } = resolveLanguageModel(config.model)
   const instructions = buildInstructions(config)
+
+  const readState = new Map<string, string>()
 
   const toolContext: ToolExecutionContext = {
     cwd: config.cwd,
     grants: config.grants,
     abortSignal: signal,
+    readState,
+    threadId,
+    onCheckpoint,
   }
 
   const tools = buildTools(toolContext)

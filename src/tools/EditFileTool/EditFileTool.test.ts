@@ -92,4 +92,44 @@ describe('EditFileTool', () => {
     const fileOnDisk = readFileSync(testFile, 'utf-8')
     expect(fileOnDisk).toBe('line 1\r\nline TWO\r\nline 3\r\n')
   })
+
+  it('enforces CAS #1 read-before-write guard when readState is present', async () => {
+    const readState = new Map<string, string>()
+    const ctxWithReadState: ToolExecutionContext = {
+      ...context,
+      readState,
+    }
+
+    const editTool = createEditFileTool(ctxWithReadState)
+    if (!editTool.execute) throw new Error('execute is undefined')
+
+    // 1. Without having read the file, edit fails
+    const res1 = (await editTool.execute(
+      { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
+      { ...execOptions, toolCallId: 'cas_1' }
+    )) as ToolExecutionResult<unknown>
+    expect(res1.ok).toBe(false)
+    expect(res1.error).toMatch(/File changed since you read it \(or was never read\)/)
+
+    // 2. Populate readState with stale/wrong hash -> edit fails
+    readState.set('sample.txt', 'stale_hash_value')
+    const res2 = (await editTool.execute(
+      { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
+      { ...execOptions, toolCallId: 'cas_2' }
+    )) as ToolExecutionResult<unknown>
+    expect(res2.ok).toBe(false)
+    expect(res2.error).toMatch(/File changed since you read it \(or was never read\)/)
+
+    // 3. Populate readState with correct current hash -> edit succeeds
+    const { computeHash } = await import('../fs.ts')
+    const currentHash = computeHash(readFileSync(testFile))
+    readState.set('sample.txt', currentHash)
+
+    const res3 = (await editTool.execute(
+      { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
+      { ...execOptions, toolCallId: 'cas_3' }
+    )) as ToolExecutionResult<unknown>
+    expect(res3.ok).toBe(true)
+    expect(readFileSync(testFile, 'utf-8')).toBe('line 1\nline TWO\nline 3\n')
+  })
 })

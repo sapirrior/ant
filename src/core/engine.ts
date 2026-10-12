@@ -12,6 +12,7 @@ import {
   appendMessage,
   type ThreadRecord,
 } from '../store/threads.ts'
+import { recordCheckpoint } from '../store/checkpoints.ts'
 
 export function setupSignalHandler(): {
   readonly controller: AbortController
@@ -151,6 +152,10 @@ export class Engine {
         config,
         messages,
         signal: controller.signal,
+        threadId: thread.id,
+        onCheckpoint: (tool, toolCallId, files) => {
+          return recordCheckpoint(db, thread.id, tool, toolCallId, files)
+        },
         onEvent: (event: RunEvent) => {
           switch (event.type) {
             case 'tool-call': {

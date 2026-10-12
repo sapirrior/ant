@@ -99,6 +99,12 @@ export interface ModelRunOptions {
   readonly config: Config
   readonly messages: ModelMessage[]
   readonly signal: AbortSignal
+  readonly threadId?: string
+  readonly onCheckpoint?: (
+    tool: string,
+    toolCallId: string | undefined,
+    files: { path: string; before: import('../tools/fs.ts').FileSnapshot | null; after: import('../tools/fs.ts').FileSnapshot | null }[]
+  ) => number
   readonly onEvent?: (event: RunEvent) => void
 }
 
@@ -116,6 +122,14 @@ export interface ToolExecutionContext {
   readonly cwd: string
   readonly grants: Grants
   readonly abortSignal?: AbortSignal
+  readonly readState?: Map<string, string>
+  readonly threadId?: string
+  readonly toolCallId?: string
+  readonly onCheckpoint?: (
+    tool: string,
+    toolCallId: string | undefined,
+    files: { path: string; before: import('../tools/fs.ts').FileSnapshot | null; after: import('../tools/fs.ts').FileSnapshot | null }[]
+  ) => number
 }
 
 export interface ToolExecutionResult<T = unknown> {

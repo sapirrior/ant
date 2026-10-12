@@ -3,6 +3,7 @@ import { Command } from 'commander'
 import { registerConfigCommand } from './cli/config.ts'
 import { registerRunCommand } from './cli/run.ts'
 import { registerThreadsCommand } from './cli/threads.ts'
+import { registerCheckpointsCommand } from './cli/checkpoints.ts'
 
 export function createProgram(): Command {
   const program = new Command()
@@ -13,6 +14,7 @@ export function createProgram(): Command {
 
   registerConfigCommand(program)
   registerThreadsCommand(program)
+  registerCheckpointsCommand(program)
   registerRunCommand(program)
 
   return program

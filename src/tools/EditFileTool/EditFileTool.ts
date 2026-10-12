@@ -1,15 +1,13 @@
 import { existsSync, statSync } from 'node:fs'
-import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { relative } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { resolveWithinRoot } from '../../policy/paths.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { EDIT_FILE_DESCRIPTION } from './prompt.ts'
-
-export const MAX_EDITABLE_FILE_SIZE_BYTES = 50 * 1024 * 1024 // 50 MiB safety guard
+import { atomicWrite, snapshot, MAX_CHECKPOINT_BYTES } from '../fs.ts'
 
 export const editFileInputSchema = z.object({
   path: z.string().describe('The path of the file to edit (relative or absolute).'),
@@ -35,6 +33,7 @@ export function createEditFileTool(context: ToolExecutionContext) {
     execute: async (input) => {
       return executeWithPolicy('EditFile', input, context, async ({ path, oldContent, newContent, replaceAll }) => {
         const fullPath = resolveWithinRoot(path, context.cwd)
+        const relPath = relative(context.cwd, fullPath).replace(/\\/g, '/')
 
         // 1. Precondition checks
         if (!existsSync(fullPath)) {
@@ -46,15 +45,29 @@ export function createEditFileTool(context: ToolExecutionContext) {
           throw new Error(`Cannot edit directory "${path}". EditFile only operates on files.`)
         }
 
-        if (stats.size > MAX_EDITABLE_FILE_SIZE_BYTES) {
-          throw new Error(`File "${path}" is too large to edit (${Math.round(stats.size / (1024 * 1024))} MiB). Limit is 50 MiB.`)
+        if (stats.size > MAX_CHECKPOINT_BYTES) {
+          throw new Error(`File "${path}" is too large to edit (${Math.round(stats.size / (1024 * 1024))} MiB). Limit is 20 MiB.`)
         }
 
         if (oldContent === newContent) {
           throw new Error(`No changes to make: "oldContent" and "newContent" are identical.`)
         }
 
-        // 2. Read and normalize line endings for matching
+        // 2. Snapshot BEFORE mutation
+        const before = snapshot(fullPath)
+        if (!before) {
+          throw new Error(`File not found: ${path}`)
+        }
+
+        // 3. CAS #1 Guard: Read-before-write check
+        if (context.readState) {
+          const lastReadHash = context.readState.get(relPath)
+          if (!lastReadHash || lastReadHash !== before.hash) {
+            throw new Error('File changed since you read it (or was never read). Read it again.')
+          }
+        }
+
+        // 4. Read and normalize line endings for matching
         const rawContent = await readFile(fullPath, 'utf-8')
         const originalLineEnding = detectLineEnding(rawContent)
 
@@ -78,7 +91,7 @@ export function createEditFileTool(context: ToolExecutionContext) {
           )
         }
 
-        // 3. Perform replacement
+        // 5. Perform replacement
         let updatedNormalized: string
         if (replaceAll) {
           updatedNormalized = normalizedContent.split(normalizedOld).join(normalizedNew)
@@ -86,27 +99,27 @@ export function createEditFileTool(context: ToolExecutionContext) {
           updatedNormalized = normalizedContent.replace(normalizedOld, normalizedNew)
         }
 
-        // 4. Restore original line endings
+        // 6. Restore original line endings
         const finalContent =
           originalLineEnding === '\r\n'
             ? updatedNormalized.replace(/\n/g, '\r\n')
             : updatedNormalized
 
-        // 5. Atomic write: write to sibling temp file first, then atomic rename
-        const tempFilePath = join(
-          dirname(fullPath),
-          `.ant.tmp.${randomBytes(8).toString('hex')}`
-        )
+        // 7. Atomic write
+        atomicWrite(fullPath, finalContent, before.mode)
 
-        try {
-          await writeFile(tempFilePath, finalContent, 'utf-8')
-          await rename(tempFilePath, fullPath)
-        } catch (writeErr) {
-          // Clean up temp file on failure
-          if (existsSync(tempFilePath)) {
-            await unlink(tempFilePath).catch(() => {})
-          }
-          throw writeErr
+        // 8. Snapshot AFTER mutation
+        const after = snapshot(fullPath)
+        if (after && context.readState) {
+          context.readState.set(relPath, after.hash)
+        }
+
+        // 9. Record checkpoint
+        let checkpointSeq: number | undefined
+        if (context.onCheckpoint) {
+          checkpointSeq = context.onCheckpoint('EditFile', context.toolCallId, [
+            { path: relPath, before, after },
+          ])
         }
 
         return {
@@ -115,6 +128,7 @@ export function createEditFileTool(context: ToolExecutionContext) {
           occurrencesReplaced: occurrences,
           oldLength: oldContent.length,
           newLength: newContent.length,
+          checkpoint: checkpointSeq ? `#${checkpointSeq}` : undefined,
         }
       })
     },
