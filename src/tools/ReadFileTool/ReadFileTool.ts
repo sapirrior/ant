@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { resolveWithinRoot } from '../../policy/paths.ts'
-import type { ToolExecutionContext } from '../../types/tools.ts'
+import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { READ_FILE_DESCRIPTION } from './prompt.ts'
 

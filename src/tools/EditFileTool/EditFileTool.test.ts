@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createEditFileTool } from './EditFileTool.ts'
-import type { ToolExecutionContext, ToolExecutionResult } from '../../types/tools.ts'
+import type { ToolExecutionContext, ToolExecutionResult } from '../../core/types.ts'
 
 describe('EditFileTool', () => {
   let testDir: string

@@ -1,6 +1,4 @@
-import { authorize } from '../policy/authorize.ts'
-import { getRequiredCapabilityForTool } from '../policy/capabilities.ts'
-import type { ToolExecutionContext, ToolExecutionResult, ToolName } from '../types/tools.ts'
+import type { ToolExecutionContext, ToolExecutionResult, ToolName } from '../core/types.ts'
 
 export class ToolExecutionQueue {
   private tail: Promise<unknown> = Promise.resolve()
@@ -21,21 +19,8 @@ export async function executeWithPolicy<TInput, TOutput>(
   context: ToolExecutionContext,
   action: (input: TInput, context: ToolExecutionContext) => Promise<TOutput>
 ): Promise<ToolExecutionResult<TOutput>> {
-  // Serialize all tool executions through the queue to prevent parallel race conditions
   return globalToolQueue.run(async () => {
-    // 1. Authorization check
-    const requiredCap = getRequiredCapabilityForTool(toolName)
-    const decision = authorize(requiredCap, context.grants)
-
-    if (!decision.allowed) {
-      return {
-        ok: false,
-        output: null as unknown as TOutput,
-        error: decision.reason ?? `Operation not permitted for tool ${toolName}`,
-      }
-    }
-
-    // 2. Abort signal check
+    // 1. Abort signal check
     if (context.abortSignal?.aborted) {
       return {
         ok: false,
@@ -44,7 +29,7 @@ export async function executeWithPolicy<TInput, TOutput>(
       }
     }
 
-    // 3. Execute with error boundary
+    // 2. Execute with error boundary
     try {
       const output = await action(input, context)
       return {

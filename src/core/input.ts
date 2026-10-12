@@ -1,11 +1,16 @@
+import { fstatSync } from 'node:fs'
+
 export const MAX_STDIN_BYTES = 10 * 1024 * 1024 // 10 MiB limit
 
 export async function readPipedStdin(
-  maxBytes: number = MAX_STDIN_BYTES,
-  isTTY: boolean = Boolean(process.stdin.isTTY)
+  maxBytes: number = MAX_STDIN_BYTES
 ): Promise<string | undefined> {
-  // If running interactively with a terminal attached, stdin is not piped
-  if (isTTY) {
+  try {
+    const stat = fstatSync(0)
+    if (!stat.isFIFO() && !stat.isFile()) {
+      return undefined
+    }
+  } catch {
     return undefined
   }
 
@@ -25,5 +30,6 @@ export async function readPipedStdin(
     return undefined
   }
 
-  return Buffer.concat(chunks).toString('utf-8')
+  const content = Buffer.concat(chunks).toString('utf-8')
+  return content.trim().length === 0 ? undefined : content
 }

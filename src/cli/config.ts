@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import type { LogLevel, OutputFormat } from '../types/config.ts'
+import type { LogLevel, OutputFormat } from '../core/types.ts'
 import {
   getSettingsPath,
   loadSettings,
@@ -7,7 +7,7 @@ import {
   saveSettings,
   validateModelString,
   type UserSettings,
-} from '../settings/settings.ts'
+} from '../settings.ts'
 
 export function registerConfigCommand(program: Command): void {
   const configCmd = program
@@ -17,7 +17,7 @@ export function registerConfigCommand(program: Command): void {
       const current = loadSettings()
       const settingsPath = getSettingsPath()
       process.stdout.write(`Settings (${settingsPath}):\n${JSON.stringify(current, null, 2)}\n`)
-      process.exit(0)
+      process.exitCode = 0
     })
 
   configCmd
@@ -31,7 +31,7 @@ export function registerConfigCommand(program: Command): void {
       } else {
         process.stdout.write(`${val}\n`)
       }
-      process.exit(0)
+      process.exitCode = 0
     })
 
   configCmd
@@ -51,7 +51,8 @@ export function registerConfigCommand(program: Command): void {
           const num = Number.parseInt(value, 10)
           if (Number.isNaN(num) || num <= 0) {
             process.stderr.write('[ant] error: maxSteps must be a positive integer.\n')
-            process.exit(2)
+            process.exitCode = 2
+            return
           }
           updated.maxSteps = num
           break
@@ -63,14 +64,16 @@ export function registerConfigCommand(program: Command): void {
         case 'outputFormat':
           if (value !== 'text' && value !== 'md' && value !== 'json') {
             process.stderr.write('[ant] error: outputFormat must be text, md, or json.\n')
-            process.exit(2)
+            process.exitCode = 2
+            return
           }
           updated.outputFormat = value as OutputFormat
           break
         case 'logLevel':
           if (value !== 'error' && value !== 'info' && value !== 'debug') {
             process.stderr.write('[ant] error: logLevel must be error, info, or debug.\n')
-            process.exit(2)
+            process.exitCode = 2
+            return
           }
           updated.logLevel = value as LogLevel
           break
@@ -82,11 +85,12 @@ export function registerConfigCommand(program: Command): void {
           break
         default:
           process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
-          process.exit(2)
+          process.exitCode = 2
+          return
       }
 
       saveSettings(updated as UserSettings)
       process.stdout.write(`Updated ${key} = ${value} in ${settingsPath}\n`)
-      process.exit(0)
+      process.exitCode = 0
     })
 }

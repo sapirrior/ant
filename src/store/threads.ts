@@ -5,8 +5,12 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type { ModelMessage } from 'ai'
 
+export function getAntHome(): string {
+  return process.env.ANT_HOME ?? join(homedir(), '.ant')
+}
+
 export function getThreadsDirectory(): string {
-  return join(homedir(), '.ant', 'threads')
+  return join(getAntHome(), 'threads')
 }
 
 export async function ensureThreadsDirectory(): Promise<string> {

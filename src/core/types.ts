@@ -1,5 +1,33 @@
 import type { ModelMessage } from 'ai'
-import type { Config } from './config.ts'
+
+export type OutputFormat = 'text' | 'md' | 'json'
+
+export type LogLevel = 'error' | 'info' | 'debug'
+
+export type Capability =
+  | 'fs.read'
+  | 'fs.write'
+  | 'shell.run'
+  | 'shell.destructive'
+
+export interface Grants {
+  readonly has: (cap: Capability) => boolean
+  readonly capabilities: ReadonlySet<Capability>
+}
+
+export interface Config {
+  readonly prompt?: string
+  readonly stdinInput?: string
+  readonly model: string
+  readonly maxSteps: number
+  readonly timeoutMs: number
+  readonly outputFormat: OutputFormat
+  readonly logLevel: LogLevel
+  readonly grants: Grants
+  readonly cwd: string
+  readonly continueLatest: boolean
+  readonly resumeThreadId?: string
+}
 
 export type Status =
   | 'completed'
@@ -21,7 +49,6 @@ export interface UsageSummary {
 }
 
 export type RunEvent =
-  | { readonly type: 'step-start'; readonly stepNumber: number }
   | {
       readonly type: 'step-finish'
       readonly stepNumber: number
@@ -43,7 +70,6 @@ export type RunEvent =
       readonly isError?: boolean
     }
   | { readonly type: 'text-delta'; readonly delta: string }
-  | { readonly type: 'diagnostics'; readonly message: string }
 
 export interface ModelOutcome {
   readonly status: Status
@@ -61,6 +87,24 @@ export interface ModelRunOptions {
   readonly onEvent?: (event: RunEvent) => void
 }
 
-export interface ModelPort {
-  run(options: ModelRunOptions): Promise<ModelOutcome>
+export type ToolName =
+  | 'ReadFile'
+  | 'ListDir'
+  | 'Grep'
+  | 'WriteFile'
+  | 'EditFile'
+  | 'DeleteFile'
+  | 'Bash'
+  | 'AskUser'
+
+export interface ToolExecutionContext {
+  readonly cwd: string
+  readonly grants: Grants
+  readonly abortSignal?: AbortSignal
+}
+
+export interface ToolExecutionResult<T = unknown> {
+  readonly ok: boolean
+  readonly output: T
+  readonly error?: string
 }

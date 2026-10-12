@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { LogLevel, OutputFormat } from '../types/config.ts'
+import type { LogLevel, OutputFormat } from './core/types.ts'
 
 export interface UserSettings {
   readonly model?: string

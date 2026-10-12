@@ -1,19 +1,19 @@
 import { Command } from 'commander'
-import { readPipedStdin } from '../engine/stdin.ts'
+import { readPipedStdin } from '../core/input.ts'
 import { resolveGrants } from '../policy/grants.ts'
-import { Engine } from '../engine/engine.ts'
+import { Engine } from '../core/engine.ts'
 import {
   loadSettings,
   parseDurationMs,
   validateModelString,
-} from '../settings/settings.ts'
-import type { Config, LogLevel, OutputFormat } from '../types/config.ts'
+} from '../settings.ts'
+import type { Config, LogLevel, OutputFormat } from '../core/types.ts'
 
-export const DEFAULT_MAX_STEPS = 30
-export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
-export const DEFAULT_MODEL = 'anthropic/claude-3-7-sonnet-20250219'
-export const DEFAULT_OUTPUT_FORMAT: OutputFormat = 'text'
-export const DEFAULT_LOG_LEVEL: LogLevel = 'info'
+const DEFAULT_MAX_STEPS = 30
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
+const DEFAULT_MODEL = 'anthropic/claude-3-7-sonnet-20250219'
+const DEFAULT_OUTPUT_FORMAT: OutputFormat = 'text'
+const DEFAULT_LOG_LEVEL: LogLevel = 'info'
 
 export function registerRunCommand(program: Command): void {
   program
@@ -40,15 +40,12 @@ export function registerRunCommand(program: Command): void {
         const userSettings = loadSettings()
         const env = process.env
 
-        // 1. Resolve prompt: -p flag > positional argument
         const prompt = options.prompt ?? positionalPrompt
 
-        // 2. Resolve model: explicit CLI flag > settings.json > env > default
         const rawModel = options.model ?? userSettings.model ?? env.ANT_MODEL ?? DEFAULT_MODEL
         validateModelString(rawModel)
         const model = rawModel
 
-        // 3. Resolve maxSteps: explicit CLI flag > settings.json > env > default
         let maxSteps: number | undefined
         if (options.maxSteps !== undefined) {
           const parsed = Number.parseInt(options.maxSteps, 10)
@@ -66,14 +63,12 @@ export function registerRunCommand(program: Command): void {
         }
         maxSteps = maxSteps ?? DEFAULT_MAX_STEPS
 
-        // 4. Resolve timeout: explicit CLI flag > settings.json > env > default
         let timeoutMs = DEFAULT_TIMEOUT_MS
         const timeoutSource = options.timeout ?? userSettings.timeout ?? env.ANT_TIMEOUT
         if (timeoutSource !== undefined) {
           timeoutMs = parseDurationMs(timeoutSource)
         }
 
-        // 5. Output format & Log level: explicit CLI flag > settings.json > env > default
         const outputFormat = options.output ?? userSettings.outputFormat ?? DEFAULT_OUTPUT_FORMAT
         if (outputFormat !== 'text' && outputFormat !== 'md' && outputFormat !== 'json') {
           throw new Error(`Invalid --output value: "${outputFormat}". Allowed: text, md, json`)
@@ -84,7 +79,6 @@ export function registerRunCommand(program: Command): void {
           throw new Error(`Invalid --log-level value: "${logLevel}". Allowed: error, info, debug`)
         }
 
-        // 6. Capability grants: explicit CLI flag > settings.json > default (false)
         const allowRead = options.allowRead !== undefined ? Boolean(options.allowRead) : Boolean(userSettings.allowRead)
         const allowEdit = options.allowEdit !== undefined ? Boolean(options.allowEdit) : Boolean(userSettings.allowEdit)
         const allowBash = options.allowBash !== undefined ? Boolean(options.allowBash) : Boolean(userSettings.allowBash)
@@ -113,11 +107,11 @@ export function registerRunCommand(program: Command): void {
 
         const engine = new Engine()
         const exitCode = await engine.run(config)
-        process.exit(exitCode)
+        process.exitCode = exitCode
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         process.stderr.write(`[ant] error: ${message}\n`)
-        process.exit(2)
+        process.exitCode = 2
       }
     })
 }

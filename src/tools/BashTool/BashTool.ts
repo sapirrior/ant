@@ -1,7 +1,7 @@
 import { exec } from 'node:child_process'
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { ToolExecutionContext } from '../../types/tools.ts'
+import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { classifyCommand } from './classify.ts'
 import { BASH_DESCRIPTION } from './prompt.ts'

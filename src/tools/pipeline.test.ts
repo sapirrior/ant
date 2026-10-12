@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { ToolExecutionQueue, executeWithPolicy } from './pipeline.ts'
-import type { ToolExecutionContext } from '../types/tools.ts'
+import { buildTools } from './index.ts'
+import type { ToolExecutionContext } from '../core/types.ts'
 
 describe('ToolExecutionQueue', () => {
   it('serializes async tasks strictly in order', async () => {
@@ -26,7 +27,6 @@ describe('ToolExecutionQueue', () => {
 
     const results = await Promise.all([p1, p2, p3])
     expect(results).toEqual([1, 2, 3])
-    // Even though p2 and p3 had shorter/zero delays, they must finish in strict 1 -> 2 -> 3 order
     expect(executionOrder).toEqual([1, 2, 3])
   })
 
@@ -50,13 +50,17 @@ describe('ToolExecutionQueue', () => {
     expect(executionOrder).toEqual(['first', 'second'])
   })
 
-  it('rejects unauthorized tools before running action', async () => {
+  it('aborts execution when abortSignal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
     const context: ToolExecutionContext = {
       cwd: process.cwd(),
       grants: {
-        has: () => false,
-        capabilities: new Set(),
+        has: () => true,
+        capabilities: new Set(['fs.read']),
       },
+      abortSignal: controller.signal,
     }
 
     let actionRan = false
@@ -67,6 +71,23 @@ describe('ToolExecutionQueue', () => {
 
     expect(result.ok).toBe(false)
     expect(actionRan).toBe(false)
-    expect(result.error).toMatch(/fs.read/)
+    expect(result.error).toMatch(/aborted by user signal/)
+  })
+
+  it('exposes only tools granted by capability', () => {
+    const readOnlyCtx: ToolExecutionContext = {
+      cwd: process.cwd(),
+      grants: {
+        has: (c) => c === 'fs.read',
+        capabilities: new Set(['fs.read']),
+      },
+    }
+    const readTools = Object.keys(buildTools(readOnlyCtx))
+    expect(readTools).toContain('AskUser')
+    expect(readTools).toContain('ReadFile')
+    expect(readTools).toContain('ListDir')
+    expect(readTools).toContain('Grep')
+    expect(readTools).not.toContain('WriteFile')
+    expect(readTools).not.toContain('Bash')
   })
 })

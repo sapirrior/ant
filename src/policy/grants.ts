@@ -1,4 +1,4 @@
-import type { Capability, Grants } from '../types/config.ts'
+import type { Capability, Grants } from '../core/types.ts'
 
 export interface GrantOptions {
   readonly allowRead?: boolean

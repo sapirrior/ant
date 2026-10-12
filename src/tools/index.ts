@@ -1,5 +1,5 @@
 import type { ToolSet } from 'ai'
-import type { ToolExecutionContext } from '../types/tools.ts'
+import type { ToolExecutionContext } from '../core/types.ts'
 import { createAskUserTool } from './AskUserTool/AskUserTool.ts'
 import { createBashTool } from './BashTool/BashTool.ts'
 import { createDeleteFileTool } from './DeleteFileTool/DeleteFileTool.ts'

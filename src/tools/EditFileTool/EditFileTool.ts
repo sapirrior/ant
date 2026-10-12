@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { resolveWithinRoot } from '../../policy/paths.ts'
-import type { ToolExecutionContext } from '../../types/tools.ts'
+import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { EDIT_FILE_DESCRIPTION } from './prompt.ts'
 

@@ -1,21 +1,39 @@
 import type { ModelMessage } from 'ai'
-import { AiSdkModelAdapter } from '../model/adapter.ts'
-import { renderOutcome } from '../output/render.ts'
-import { StderrLogger } from '../output/stderr.ts'
-import { writeStdout } from '../output/stdout.ts'
-import type { Config } from '../types/config.ts'
-import type { ExitCode, ModelPort } from '../types/run.ts'
-import { setupSignalHandler } from './signals.ts'
-import { generateThreadId, getLatestThreadId, loadThread, saveThread } from './threads.ts'
+import { runAgent } from './agent.ts'
+import { renderOutcome, writeStdout } from '../output/render.ts'
+import { StderrLogger } from '../output/log.ts'
+import type { Config, ExitCode, RunEvent } from './types.ts'
+import { generateThreadId, getLatestThreadId, loadThread, saveThread } from '../store/threads.ts'
+
+export function setupSignalHandler(): {
+  readonly controller: AbortController
+  readonly cleanup: () => void
+} {
+  const controller = new AbortController()
+
+  const handleSignal = () => {
+    if (!controller.signal.aborted) {
+      controller.abort()
+    }
+  }
+
+  process.on('SIGINT', handleSignal)
+  process.on('SIGTERM', handleSignal)
+
+  const cleanup = () => {
+    process.off('SIGINT', handleSignal)
+    process.off('SIGTERM', handleSignal)
+  }
+
+  return { controller, cleanup }
+}
 
 export class Engine {
-  constructor(private readonly modelPort: ModelPort = new AiSdkModelAdapter()) {}
-
   async run(config: Config): Promise<ExitCode> {
     const logger = new StderrLogger(config.logLevel)
     const { controller, cleanup } = setupSignalHandler()
+    const startTime = Date.now()
 
-    // Wall-clock timeout handler
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined
     if (config.timeoutMs > 0) {
       timeoutTimer = setTimeout(() => {
@@ -25,13 +43,14 @@ export class Engine {
     }
 
     try {
-      // 1. Resolve conversation thread & history
       let threadId: string
       let messages: ModelMessage[] = []
+      let isNewThread = true
 
       if (config.resumeThreadId) {
         threadId = config.resumeThreadId
         messages = await loadThread(threadId)
+        isNewThread = false
         logger.debug(`Resumed thread ${threadId} with ${messages.length} messages`)
       } else if (config.continueLatest) {
         const latestId = await getLatestThreadId()
@@ -40,12 +59,12 @@ export class Engine {
         }
         threadId = latestId
         messages = await loadThread(threadId)
+        isNewThread = false
         logger.debug(`Continued latest thread ${threadId} with ${messages.length} messages`)
       } else {
         threadId = generateThreadId()
       }
 
-      // 2. Assemble user input from prompt and stdin
       let userContent = ''
       if (config.prompt && config.stdinInput) {
         userContent = `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
@@ -62,14 +81,26 @@ export class Engine {
         content: userContent,
       })
 
-      logger.info(`Starting execution (model: ${config.model}, thread: ${threadId})`)
+      const allowedCaps: string[] = []
+      if (config.grants.has('fs.read')) allowedCaps.push('read')
+      if (config.grants.has('fs.write')) allowedCaps.push('edit')
+      if (config.grants.has('shell.run')) allowedCaps.push('bash')
+      if (config.grants.has('shell.destructive')) allowedCaps.push('destructiveBash')
 
-      // 3. Execute model loop
-      const outcome = await this.modelPort.run({
+      logger.header({
+        model: config.model,
+        threadId,
+        title: userContent.replace(/\s+/g, ' ').slice(0, 80),
+        isNew: isNewThread,
+        messageCount: messages.length,
+        allowedCaps,
+      })
+
+      const outcome = await runAgent({
         config,
         messages,
         signal: controller.signal,
-        onEvent: (event) => {
+        onEvent: (event: RunEvent) => {
           switch (event.type) {
             case 'tool-call': {
               let summary: string | undefined
@@ -80,11 +111,11 @@ export class Engine {
                 else if (typeof obj.pattern === 'string') summary = `/${obj.pattern}/`
                 else if (typeof obj.question === 'string') summary = `"${obj.question.slice(0, 50)}"`
               }
-              logger.toolCall(event.toolName, summary)
+              logger.toolStart(event.toolName, summary)
               break
             }
             case 'tool-result':
-              logger.toolResult(event.toolName, event.durationMs)
+              logger.toolEnd('done', event.durationMs, Boolean(event.isError))
               break
             case 'step-finish':
               logger.debug(`step ${event.stepNumber} finished (${event.finishReason})`)
@@ -93,7 +124,6 @@ export class Engine {
         },
       })
 
-      // 4. Update and persist thread history
       if (outcome.text) {
         messages.push({
           role: 'assistant',
@@ -102,23 +132,26 @@ export class Engine {
       }
       await saveThread(threadId, messages)
 
-      // 5. Output rendering & logging
-      if (outcome.status === 'completed') {
-        logger.completed(outcome.stepsExecuted, outcome.usage?.totalTokens)
-      } else if (outcome.error) {
-        logger.error(outcome.error)
-      } else {
-        logger.error(`Execution finished with status: ${outcome.status}`)
-      }
+      logger.footer({
+        status: outcome.status,
+        steps: outcome.stepsExecuted,
+        totalTokens: outcome.usage?.totalTokens,
+        durationMs: Date.now() - startTime,
+        threadId,
+        error: outcome.error,
+      })
 
-      const renderedOutput = renderOutcome(outcome, config.outputFormat)
+      const renderedOutput = renderOutcome(outcome, {
+        format: config.outputFormat,
+        threadId,
+      })
       writeStdout(renderedOutput)
 
       return outcome.exitCode
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger.error(message)
-      return 2 // usage or configuration error
+      return 2
     } finally {
       if (timeoutTimer) {
         clearTimeout(timeoutTimer)

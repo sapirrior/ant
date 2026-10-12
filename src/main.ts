@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from 'commander'
-import { registerConfigCommand } from './commands/ConfigCommand.ts'
-import { registerRunCommand } from './commands/RunCommand.ts'
+import { registerConfigCommand } from './cli/config.ts'
+import { registerRunCommand } from './cli/run.ts'
 
 export function createProgram(): Command {
   const program = new Command()
@@ -10,7 +10,6 @@ export function createProgram(): Command {
     .description('A daily-use, streaming, model-agnostic AI agent CLI')
     .version('0.1.0')
 
-  // Register subcommands first, then the root run command
   registerConfigCommand(program)
   registerRunCommand(program)
 
@@ -23,5 +22,11 @@ export async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  await main()
+  try {
+    await main()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`[ant] error: ${msg}\n`)
+    process.exitCode = process.exitCode || 2
+  }
 }

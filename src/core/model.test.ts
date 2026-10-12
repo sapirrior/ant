@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { parseModelString, resolveLanguageModel } from './registry.ts'
+import { parseModelString, resolveLanguageModel } from './model.ts'
 
 describe('model registry', () => {
   it('parses provider and model ID correctly', () => {
