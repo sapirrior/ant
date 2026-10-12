@@ -42,8 +42,11 @@ export function registerRunCommand(program: Command): void {
         const userSettings = loadSettings()
         const env = process.env
 
-        // 1. Resolve prompt
+        // 1. Resolve and validate prompt
         const prompt = options.prompt ?? positionalPrompt
+        if (!prompt && !stdinInput && !options.continue && !options.resume) {
+          throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
+        }
 
         // 2. Resolve model: CLI flag > env > settings.json (no hardcoded default)
         const rawModel = options.model ?? env.ANT_MODEL ?? userSettings.model
@@ -138,6 +141,7 @@ export function registerRunCommand(program: Command): void {
           cwd: process.cwd(),
           continueLatest: Boolean(options.continue),
           resumeThreadId: options.resume,
+          settings: userSettings,
         }
 
         const engine = new Engine()

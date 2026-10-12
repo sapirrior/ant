@@ -1,7 +1,7 @@
 import type { ModelMessage } from 'ai'
+import type { Database } from 'bun:sqlite'
 import { realpathSync } from 'node:fs'
 import { runAgent } from './agent.ts'
-import { renderOutcome, writeStdout } from '../output/render.ts'
 import { StderrLogger } from '../output/log.ts'
 import type { Config, ExitCode, RunEvent, UsageSummary } from './types.ts'
 import { openDb, acquireLease, releaseLease } from '../store/db.ts'
@@ -10,68 +10,65 @@ import {
   getThread,
   getMessages,
   appendMessage,
+  recordStepMessages,
   type ThreadRecord,
 } from '../store/threads.ts'
 import { recordCheckpoint } from '../store/checkpoints.ts'
 import { TaskManagerRegistry } from '../tools/tasks.ts'
-import { StreamingMarkdownRenderer } from '../output/markdown.ts'
+import { createOutputSink, StreamJsonSink } from '../output/sink.ts'
+import { createLifecycle } from './lifecycle.ts'
+import { repairHistory } from '../store/repair.ts'
 
 export function setupSignalHandler(): {
   readonly controller: AbortController
   readonly cleanup: () => void
 } {
-  const controller = new AbortController()
-
-  const handleSigint = () => {
-    if (!controller.signal.aborted) {
-      ;(controller.signal as any).reason = 'SIGINT'
-      controller.abort()
-    } else {
-      // Second SIGINT forces hard exit 130
-      process.exit(130)
-    }
+  const lifecycle = createLifecycle()
+  return {
+    controller: lifecycle.controller,
+    cleanup: () => lifecycle.dispose(),
   }
-
-  const handleSigterm = () => {
-    if (!controller.signal.aborted) {
-      ;(controller.signal as any).reason = 'SIGTERM'
-      controller.abort()
-    }
-  }
-
-  process.on('SIGINT', handleSigint)
-  process.on('SIGTERM', handleSigterm)
-
-  const cleanup = () => {
-    process.off('SIGINT', handleSigint)
-    process.off('SIGTERM', handleSigterm)
-  }
-
-  return { controller, cleanup }
 }
 
 export class Engine {
   async run(config: Config): Promise<ExitCode> {
     const logger = new StderrLogger(config.logLevel)
-    const { controller, cleanup } = setupSignalHandler()
+    const lifecycle = createLifecycle()
     const startTime = Date.now()
     const tasks = new TaskManagerRegistry()
     const createdCheckpoints: number[] = []
 
+    // Clamp timeout to 32-bit positive integer (Plan §2.2 / I9)
+    const clampedTimeoutMs = config.timeoutMs > 0 ? Math.min(config.timeoutMs, 2_147_483_647) : 0
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined
-    if (config.timeoutMs > 0) {
+    if (clampedTimeoutMs > 0) {
       timeoutTimer = setTimeout(() => {
-        logger.error(`Execution timed out after ${config.timeoutMs}ms`)
-        ;(controller.signal as any).reason = 'timeout'
-        controller.abort()
-      }, config.timeoutMs)
+        logger.error(`Execution timed out after ${clampedTimeoutMs}ms`)
+        lifecycle.controller.abort('timeout')
+      }, clampedTimeoutMs)
       timeoutTimer.unref()
     }
 
-    const db = openDb()
+    let db: Database | undefined
     let activeThreadId: string | undefined
 
+    // Register emergency cleanups for immediate termination signals
+    lifecycle.onEmergencyCleanup(() => {
+      tasks.killAll()
+      if (db && activeThreadId) {
+        try {
+          releaseLease(db, activeThreadId)
+        } catch {}
+      }
+      if (db) {
+        try {
+          db.close()
+        } catch {}
+      }
+    })
+
     try {
+      db = openDb()
       let thread: ThreadRecord
       let messages: ModelMessage[] = []
       let isNewThread = true
@@ -100,7 +97,23 @@ export class Engine {
         }
         activeThreadId = thread.id
         acquireLease(db, thread.id)
-        messages = getMessages(db, thread.id)
+        const storedMessages = getMessages(db, thread.id)
+        const repaired = repairHistory(storedMessages)
+        if (repaired.repaired.length > 0) {
+          logger.info(`Session history repaired on resume: ${repaired.repaired.join(', ')}`)
+          // Persist repaired messages
+          db.run('DELETE FROM messages WHERE thread_id = ?', [thread.id])
+          let seq = 0
+          for (const msg of repaired.messages) {
+            seq++
+            db.run('INSERT INTO messages (thread_id, seq, json) VALUES (?, ?, ?)', [
+              thread.id,
+              seq,
+              JSON.stringify(msg),
+            ])
+          }
+        }
+        messages = repaired.messages
         isNewThread = false
       } else if (config.continueLatest) {
         thread = getThread(db, 'latest', realCwd)
@@ -118,9 +131,36 @@ export class Engine {
         }
         activeThreadId = thread.id
         acquireLease(db, thread.id)
-        messages = getMessages(db, thread.id)
+        const storedMessages = getMessages(db, thread.id)
+        const repaired = repairHistory(storedMessages)
+        if (repaired.repaired.length > 0) {
+          logger.info(`Session history repaired on continue: ${repaired.repaired.join(', ')}`)
+          db.run('DELETE FROM messages WHERE thread_id = ?', [thread.id])
+          let seq = 0
+          for (const msg of repaired.messages) {
+            seq++
+            db.run('INSERT INTO messages (thread_id, seq, json) VALUES (?, ?, ?)', [
+              thread.id,
+              seq,
+              JSON.stringify(msg),
+            ])
+          }
+        }
+        messages = repaired.messages
         isNewThread = false
       } else {
+        // Validate user instruction before creating a thread row
+        let userContent = ''
+        if (config.prompt && config.stdinInput) {
+          userContent = `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
+        } else if (config.prompt) {
+          userContent = config.prompt
+        } else if (config.stdinInput) {
+          userContent = config.stdinInput
+        } else {
+          throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
+        }
+
         thread = createThread(db, {
           prompt: config.prompt,
           stdinInput: config.stdinInput,
@@ -129,25 +169,34 @@ export class Engine {
         })
         activeThreadId = thread.id
         acquireLease(db, thread.id)
+
+        const userMessage: ModelMessage = {
+          role: 'user',
+          content: userContent,
+        }
+        appendMessage(db, thread.id, userMessage)
+        messages.push(userMessage)
       }
 
-      let userContent = ''
-      if (config.prompt && config.stdinInput) {
-        userContent = `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
-      } else if (config.prompt) {
-        userContent = config.prompt
-      } else if (config.stdinInput) {
-        userContent = config.stdinInput
-      } else {
-        throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
-      }
+      if (!isNewThread) {
+        let userContent = ''
+        if (config.prompt && config.stdinInput) {
+          userContent = `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
+        } else if (config.prompt) {
+          userContent = config.prompt
+        } else if (config.stdinInput) {
+          userContent = config.stdinInput
+        }
 
-      const userMessage: ModelMessage = {
-        role: 'user',
-        content: userContent,
+        if (userContent) {
+          const userMessage: ModelMessage = {
+            role: 'user',
+            content: userContent,
+          }
+          appendMessage(db, thread.id, userMessage)
+          messages.push(userMessage)
+        }
       }
-      appendMessage(db, thread.id, userMessage)
-      messages.push(userMessage)
 
       const allowedCaps: string[] = []
       if (config.grants.has('fs.read')) allowedCaps.push('read')
@@ -165,62 +214,52 @@ export class Engine {
         modelMismatchOld,
       })
 
-      // Track live streaming vs buffered output
+      // Create OutputSink according to outputFormat
       const isStdoutTTY = Boolean(process.stdout.isTTY)
-      const isJsonOutput = config.outputFormat === 'json'
-      const streamRenderer = new StreamingMarkdownRenderer()
-      let atLineStart = true
+      const sink = createOutputSink({
+        format: config.outputFormat,
+        isStdoutTTY,
+        threadId: thread.id,
+        checkpoints: createdCheckpoints,
+        model: config.model,
+        effort: config.effort,
+        startTime,
+      })
+
+      if (sink instanceof StreamJsonSink) {
+        sink.emitInit({
+          threadId: thread.id,
+          model: config.model,
+          cwd: config.cwd,
+          effort: config.effort ?? null,
+          grants: allowedCaps,
+          tools: [],
+          resumed: !isNewThread,
+        })
+      }
 
       const outcome = await runAgent({
         config,
         messages,
-        signal: controller.signal,
+        signal: lifecycle.signal,
         threadId: thread.id,
         agentContext: {
           tasks,
           onStepPersist: (stepMessages: ModelMessage[], usage?: UsageSummary) => {
-            for (const msg of stepMessages) {
-              appendMessage(db, thread.id, msg)
-            }
-            if (usage?.inputTokens || usage?.outputTokens) {
-              db.run(
-                `UPDATE threads SET 
-                   input_tokens = input_tokens + ?, 
-                   output_tokens = output_tokens + ?,
-                   updated_at = ?
-                 WHERE id = ?`,
-                [usage.inputTokens ?? 0, usage.outputTokens ?? 0, Date.now(), thread.id]
-              )
-            }
+            // Atomic step message and usage persistence (Plan §2.5 / I1)
+            recordStepMessages(db!, thread.id, stepMessages, 1, usage)
           },
         },
         onCheckpoint: (tool, toolCallId, files) => {
-          const seq = recordCheckpoint(db, thread.id, tool, toolCallId, files)
+          const seq = recordCheckpoint(db!, thread.id, tool, toolCallId, files)
           createdCheckpoints.push(seq)
           return seq
         },
         onEvent: (event: RunEvent) => {
+          sink.onEvent(event)
+
           switch (event.type) {
-            case 'text-delta': {
-              if (isStdoutTTY && !isJsonOutput) {
-                if (config.outputFormat === 'md') {
-                  const renderedChunk = streamRenderer.append(event.delta)
-                  if (renderedChunk) {
-                    process.stdout.write(renderedChunk)
-                    atLineStart = renderedChunk.endsWith('\n')
-                  }
-                } else {
-                  process.stdout.write(event.delta)
-                  atLineStart = event.delta.endsWith('\n')
-                }
-              }
-              break
-            }
             case 'tool-call': {
-              if (isStdoutTTY && !atLineStart) {
-                process.stdout.write('\n')
-                atLineStart = true
-              }
               let summary: string | undefined
               if (typeof event.input === 'object' && event.input !== null) {
                 const obj = event.input as Record<string, unknown>
@@ -236,10 +275,6 @@ export class Engine {
               break
             }
             case 'tool-result': {
-              if (isStdoutTTY && !atLineStart) {
-                process.stdout.write('\n')
-                atLineStart = true
-              }
               logger.toolEnd('done', event.durationMs, Boolean(event.isError))
               break
             }
@@ -263,26 +298,26 @@ export class Engine {
         }
       }
 
-      // Non-TTY stdout gets the final text printed once; TTY flushes remaining stream buffer
-      if (!isStdoutTTY || isJsonOutput) {
-        const renderedOutput = renderOutcome(outcome, {
-          format: config.outputFormat,
-          threadId: thread.id,
-          checkpoints: createdCheckpoints,
-        })
-        writeStdout(renderedOutput)
-      } else {
-        if (config.outputFormat === 'md') {
-          const flushed = streamRenderer.flush()
-          if (flushed) {
-            process.stdout.write(flushed)
-            atLineStart = flushed.endsWith('\n')
-          }
-        }
-        if (!atLineStart) {
-          process.stdout.write('\n')
-        }
+      // Record last_status and last_exit_code in threads table (Migration 2 / Plan §2.5)
+      try {
+        db.run('UPDATE threads SET last_status = ?, last_exit_code = ?, updated_at = ? WHERE id = ?', [
+          outcome.status,
+          outcome.exitCode,
+          Date.now(),
+          thread.id,
+        ])
+      } catch {
+        // Suppress failure here so it doesn't mask exit code
       }
+
+      // Finalize sink
+      sink.finish(outcome, {
+        threadId: thread.id,
+        checkpoints: createdCheckpoints,
+        model: config.model,
+        effort: config.effort,
+        startTime,
+      })
 
       logger.footer({
         status: outcome.status,
@@ -303,16 +338,24 @@ export class Engine {
       if (timeoutTimer) {
         clearTimeout(timeoutTimer)
       }
-      tasks.killAll()
-      if (activeThreadId) {
+      try {
+        await tasks.shutdown(2000)
+      } catch {
+        tasks.killAll()
+      }
+      if (db && activeThreadId) {
         try {
           releaseLease(db, activeThreadId)
         } catch {
           // ignore lease release failure on final teardown
         }
       }
-      db.close()
-      cleanup()
+      if (db) {
+        try {
+          db.close()
+        } catch {}
+      }
+      lifecycle.dispose()
     }
   }
 }

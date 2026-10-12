@@ -190,6 +190,34 @@ export class TaskManagerRegistry {
     }
   }
 
+  async shutdown(graceMs = 3000): Promise<void> {
+    const runningTasks: ShellTask[] = []
+    for (const task of this.tasks.values()) {
+      if (task.status === 'running' && task.child.pid) {
+        runningTasks.push(task)
+        this.stop(task.id, 'SIGTERM')
+      }
+    }
+
+    if (runningTasks.length === 0) return
+
+    const waitPromises = runningTasks.map((task) => {
+      if (task.status !== 'running') return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        const onExit = () => resolve()
+        task.waiters.push(onExit)
+      })
+    })
+
+    await Promise.race([
+      Promise.all(waitPromises),
+      new Promise<void>((resolve) => setTimeout(resolve, graceMs)),
+    ])
+
+    // Emergency kill any stubborn task
+    this.killAll()
+  }
+
   killAll(): void {
     for (const task of this.tasks.values()) {
       if (task.status === 'running' && task.child.pid) {

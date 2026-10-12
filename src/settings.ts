@@ -52,7 +52,6 @@ export const DEFAULT_SETTINGS: Settings = {
     WriteFile: { enabled: true },
     EditFile: { enabled: true },
     DeleteFile: { enabled: true },
-    AskUser: { enabled: true },
     Bash: { enabled: true, foregroundMs: 10000, passEnv: [] },
     TaskManager: { enabled: true },
     WebSearch: { enabled: true },
@@ -168,20 +167,18 @@ export async function withFileLock<T>(lockPath: string, fn: () => T | Promise<T>
   }
 }
 
-const KNOWN_TOP_KEYS = new Set([
+export const KNOWN_TOP_KEYS = new Set([
+  ...Object.keys(DEFAULT_SETTINGS),
   'model',
-  'maxSteps',
-  'timeout',
-  'retries',
-  'streamRetries',
-  'output',
-  'logLevel',
-  'theme',
-  'allow',
-  'tools',
+  'reasoning',
+  'effort',
 ])
 
-export function loadSettings(): Settings {
+export interface LoadSettingsOptions {
+  warn?: (message: string) => void
+}
+
+export function loadSettings(options?: LoadSettingsOptions): Settings {
   const path = getSettingsPath()
   if (!existsSync(path)) {
     return {}
@@ -205,9 +202,11 @@ export function loadSettings(): Settings {
     throw new Error(`Settings file at ${path} must contain a JSON object.`)
   }
 
+  const warnFn = options?.warn ?? ((msg: string) => process.stderr.write(`[ant] warning: ${msg}\n`))
+
   for (const k of Object.keys(parsed)) {
     if (!KNOWN_TOP_KEYS.has(k)) {
-      process.stderr.write(`[ant] warning: ignoring unknown setting "${k}"\n`)
+      warnFn(`ignoring unknown setting "${k}"`)
     }
   }
 

@@ -20,6 +20,8 @@ export interface ThreadRecord {
   lockPid: number | null
   lockAt: number | null
   checkpointCount?: number
+  lastStatus?: string | null
+  lastExitCode?: number | null
 }
 
 interface ThreadRow {
@@ -37,6 +39,8 @@ interface ThreadRow {
   lock_pid: number | null
   lock_at: number | null
   checkpoint_count?: number
+  last_status?: string | null
+  last_exit_code?: number | null
 }
 
 function mapRow(row: ThreadRow): ThreadRecord {
@@ -55,6 +59,8 @@ function mapRow(row: ThreadRow): ThreadRecord {
     lockPid: row.lock_pid,
     lockAt: row.lock_at,
     checkpointCount: row.checkpoint_count,
+    lastStatus: row.last_status,
+    lastExitCode: row.last_exit_code,
   }
 }
 

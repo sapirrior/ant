@@ -44,27 +44,27 @@ export function recordCheckpoint(
     return 0
   }
 
-  // 1. Insert blobs idempotently
-  for (const f of files) {
-    if (f.before) {
-      db.run('INSERT OR IGNORE INTO blobs (hash, size, data) VALUES (?, ?, ?)', [
-        f.before.hash,
-        f.before.size,
-        f.before.data,
-      ])
-    }
-    if (f.after) {
-      db.run('INSERT OR IGNORE INTO blobs (hash, size, data) VALUES (?, ?, ?)', [
-        f.after.hash,
-        f.after.size,
-        f.after.data,
-      ])
-    }
-  }
-
-  // 2. Transaction for checkpoint and checkpoint_files
   let assignedSeq = 0
   db.transaction(() => {
+    // 1. Insert blobs idempotently inside the transaction
+    for (const f of files) {
+      if (f.before) {
+        db.run('INSERT OR IGNORE INTO blobs (hash, size, data) VALUES (?, ?, ?)', [
+          f.before.hash,
+          f.before.size,
+          f.before.data,
+        ])
+      }
+      if (f.after) {
+        db.run('INSERT OR IGNORE INTO blobs (hash, size, data) VALUES (?, ?, ?)', [
+          f.after.hash,
+          f.after.size,
+          f.after.data,
+        ])
+      }
+    }
+
+    // 2. Insert checkpoint and checkpoint_files
     const seqRow = db
       .query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM checkpoints WHERE thread_id = ?')
       .get(threadId) as { max_seq: number }

@@ -18,6 +18,32 @@ import type {
 import { buildInstructions } from './prompt.ts'
 import { resolveLanguageModel, PROVIDERS } from './model.ts'
 import { TaskManagerRegistry } from '../tools/tasks.ts'
+import { abortReasonOf } from './signals.ts'
+
+export function abortOutcome(signal: AbortSignal, stepsExecuted: number, text = ''): ModelOutcome {
+  const reason = abortReasonOf(signal)
+  const isTimeout = reason === 'timeout'
+  const isSigterm = reason === 'SIGTERM'
+  const isSighup = reason === 'SIGHUP'
+
+  const status: Status = isTimeout ? 'timeout' : 'cancelled'
+  const exitCode: ExitCode = isTimeout ? 4 : isSigterm ? 143 : isSighup ? 129 : 130
+  const error = isTimeout
+    ? 'Execution timed out.'
+    : isSighup
+    ? 'Operation aborted by hangup signal (SIGHUP).'
+    : isSigterm
+    ? 'Operation terminated by system signal (SIGTERM).'
+    : 'Operation aborted by user signal.'
+
+  return {
+    status,
+    exitCode,
+    text,
+    stepsExecuted,
+    error,
+  }
+}
 
 export function mapStatusToExitCode(status: Status): ExitCode {
   switch (status) {
@@ -115,6 +141,7 @@ export async function runAgent(
   const readState = new Map<string, string>()
   const tasks = agentContext?.tasks ?? new TaskManagerRegistry()
 
+  const bashSettings = config.settings?.tools?.Bash
   const toolContext: ToolExecutionContext = {
     cwd: config.cwd,
     grants: config.grants,
@@ -123,10 +150,12 @@ export async function runAgent(
     threadId,
     tasks,
     backgroundEnabled: true,
+    foregroundMs: bashSettings?.foregroundMs,
+    passEnv: bashSettings?.passEnv,
     onCheckpoint,
   }
 
-  const tools = buildTools(toolContext)
+  const tools = buildTools(toolContext, config.settings)
   let stepsExecuted = 0
   const toolCallStartTimes = new Map<string, number>()
   let streamError: unknown = null
@@ -137,10 +166,11 @@ export async function runAgent(
       instructions,
       messages,
       tools,
+      reasoning: config.effort,
       stopWhen: isStepCount(config.maxSteps),
       abortSignal: signal,
       maxRetries: config.retries,
-      streamRetries: 1,
+      streamRetries: config.streamRetries ?? config.settings?.streamRetries ?? 1,
       timeout: {
         firstChunkMs: 180000,
         chunkMs: 60000,
@@ -230,18 +260,7 @@ export async function runAgent(
     }
 
     if (signal.aborted) {
-      const reason = (signal as any).reason
-      const isTimeout = reason === 'timeout'
-      const isSigterm = reason === 'SIGTERM'
-      const status: Status = isTimeout ? 'timeout' : 'cancelled'
-      const exitCode: ExitCode = isTimeout ? 4 : isSigterm ? 143 : 130
-      return {
-        status,
-        exitCode,
-        text: '',
-        stepsExecuted,
-        error: isTimeout ? 'Execution timed out.' : 'Operation aborted by user signal.',
-      }
+      return abortOutcome(signal, stepsExecuted)
     }
 
     const finalStep = await result.finalStep
@@ -275,18 +294,7 @@ export async function runAgent(
     }
   } catch (error) {
     if (signal.aborted) {
-      const reason = (signal as any).reason
-      const isTimeout = reason === 'timeout'
-      const isSigterm = reason === 'SIGTERM'
-      const status: Status = isTimeout ? 'timeout' : 'cancelled'
-      const exitCode: ExitCode = isTimeout ? 4 : isSigterm ? 143 : 130
-      return {
-        status,
-        exitCode,
-        text: '',
-        stepsExecuted,
-        error: isTimeout ? 'Execution timed out.' : 'Operation aborted by user signal.',
-      }
+      return abortOutcome(signal, stepsExecuted)
     }
 
     const describedError = describeModelError(error || streamError, provider)

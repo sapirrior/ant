@@ -83,7 +83,6 @@ describe('ToolExecutionQueue', () => {
       },
     }
     const readTools = Object.keys(buildTools(readOnlyCtx))
-    expect(readTools).toContain('AskUser')
     expect(readTools).toContain('ReadFile')
     expect(readTools).toContain('ListDir')
     expect(readTools).toContain('Grep')

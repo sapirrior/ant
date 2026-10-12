@@ -44,7 +44,8 @@ export function renderOutcome(
 
   // md format: formatted markdown with smart wrapping and syntax highlighting
   if (options.format === 'md') {
-    const colorLevel = options.colorLevel ?? detectColorLevel()
+    const isStdoutTTY = Boolean(process.stdout.isTTY)
+    const colorLevel = options.colorLevel ?? detectColorLevel(process.env, isStdoutTTY)
     const formatted = renderMarkdown(outcome.text, { colorLevel })
     return formatted.endsWith('\n') ? formatted : `${formatted}\n`
   }

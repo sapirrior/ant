@@ -1,7 +1,6 @@
 import type { ToolSet } from 'ai'
 import type { ToolExecutionContext, ToolName } from '../core/types.ts'
 import type { Settings } from '../settings.ts'
-import { createAskUserTool } from './AskUserTool/AskUserTool.ts'
 import { createBashTool } from './BashTool/BashTool.ts'
 import { createDeleteFileTool } from './DeleteFileTool/DeleteFileTool.ts'
 import { createEditFileTool } from './EditFileTool/EditFileTool.ts'
@@ -23,11 +22,6 @@ export function buildTools(context: ToolExecutionContext, settings?: Settings): 
 
   const isEnabled = (toolName: ToolName): boolean => {
     return settings?.tools?.[toolName]?.enabled ?? true
-  }
-
-  // AskUser is always available if enabled
-  if (isEnabled('AskUser')) {
-    tools.AskUser = createAskUserTool(context)
   }
 
   // Read tools (requires fs.read)

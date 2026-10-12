@@ -11,6 +11,23 @@ export function createProgram(): Command {
     .name('ant')
     .description('A daily-use, streaming, model-agnostic AI agent CLI')
     .version('0.1.0')
+    .exitOverride((err) => {
+      // Keep help and version exit 0
+      if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
+        process.exit(0)
+      }
+      process.exitCode = 2
+      throw err
+    })
+    .configureOutput({
+      writeErr: (str) => {
+        // Strip duplicate "error: " prefix if Commander added it
+        const clean = str.replace(/^error:\s*/i, '').trim()
+        if (clean) {
+          process.stderr.write(`[ant] error: ${clean}\n`)
+        }
+      },
+    })
 
   registerConfigCommand(program)
   registerThreadsCommand(program)

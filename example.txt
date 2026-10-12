@@ -1,0 +1,952 @@
+# Headless mode
+
+Run Antigravity CLI non-interactively to script agent tasks, integrate with CI pipelines, and capture machine-readable output.
+
+Headless mode (also called print mode) sends a single prompt to the agent, streams or returns the response, and exits. Use it whenever you need the agent’s output in a program instead of a terminal UI.
+
+## Run a single prompt
+
+Pass a prompt with `-p` (or its aliases `--print` and `--prompt`) to run once and exit:
+
+```
+agy -p "In one sentence, what is a git rebase?"
+```
+
+```
+A git rebase rewrites the commit history by transplanting a sequence of commits onto a new base commit, imposing a strictly linear progression of changes that eliminates arbitrary merge artifacts.
+```
+
+The response goes to `stdout`. Diagnostics—errors, authentication prompts, progress, and permission notices—go to `stderr`. This split keeps the captured response clean:
+
+```
+# Capture only the model response; diagnostics still print to the terminal.
+answer=$(agy -p "Name three popular version control systems, comma-separated.")
+```
+
+> **Note:** Headless mode uses your cached credentials. Authenticate once with an interactive `agy` session first. In a non-interactive environment with no terminal (for example, CI), a run that isn’t already authenticated exits with an `authentication required` error instead of hanging.
+
+## Output formats
+
+The `--output-format` flag controls the shape of `stdout`. It accepts three values:
+
+| Format | `stdout` shape | Use it for |
+| --- | --- | --- |
+| `text` | The response text (default) | Human-readable output, quick scripts |
+| `json` | One JSON object printed on completion | Capturing a result plus metadata |
+| `stream-json` | Newline-delimited JSON (NDJSON) events | Monitoring progress, tools, and token usage |
+
+### Text
+
+This is the default format. The response text goes straight to `stdout` with no wrapping:
+
+```
+agy -p "In one sentence, what does the command git bisect do?"
+```
+
+```
+Git bisect executes a binary search algorithm across a project's commit history to rapidly isolate the precise commit responsible for introducing a defect.
+```
+
+### JSON
+
+Set `--output-format json` to get a single JSON envelope after the run completes. The CLI emits it on one line; pipe through `jq` to pretty-print:
+
+```
+agy -p "In one sentence, what is a git rebase?" --output-format json | jq
+```
+
+```
+{
+  "conversation_id": "055a398f-db14-4c5f-abbb-1bf03f8120a7",
+  "status": "SUCCESS",
+  "response": "A git rebase rewrites the commit history by transplanting a sequence of commits onto a new base commit, imposing a strictly linear progression of changes that eliminates arbitrary merge artifacts.\n",
+  "duration_seconds": 7.16,
+  "num_turns": 1,
+  "usage": {
+    "input_tokens": 10415,
+    "output_tokens": 657,
+    "thinking_tokens": 616,
+    "cache_read_tokens": 8113,
+    "total_tokens": 11072
+  }
+}
+```
+
+The envelope contains these fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `conversation_id` | string | ID of the conversation, for resuming later |
+| `status` | string | Terminal status (refer to [Status values](#status-values)) |
+| `response` | string | The agent’s free-text response |
+| `error` | string | Error message; present only on failure |
+| `duration_seconds` | number | Wall-clock duration of the run |
+| `num_turns` | number | Number of user turns in the conversation |
+| `structured_output` | object | Parsed schema output; present only with `--json-schema` |
+| `json_schema` | object | The schema that was enforced; present only with `--json-schema` |
+| `usage` | object | Token counts: `input_tokens`, `output_tokens`, `thinking_tokens`, `cache_read_tokens`, `total_tokens` |
+
+#### Structured output with a schema
+
+Pass `--json-schema` to constrain the answer to a schema. The parsed object appears in `structured_output`, and `response` holds the same payload serialized as a string:
+
+```
+agy -p "Parse the semantic version string v2.14.3 into an object with integer fields major, minor, and patch." \
+  --output-format json \
+  --json-schema '{"type":"object","properties":{"major":{"type":"integer"},"minor":{"type":"integer"},"patch":{"type":"integer"}},"required":["major","minor","patch"]}' | jq
+```
+
+```
+{
+  "conversation_id": "4e502687-290c-4030-b908-5ed6c68fa5dc",
+  "status": "SUCCESS",
+  "response": "{\"major\":2,\"minor\":14,\"patch\":3}\n",
+  "duration_seconds": 4.45,
+  "num_turns": 1,
+  "structured_output": { "major": 2, "minor": 14, "patch": 3 },
+  "json_schema": {
+    "type": "object",
+    "properties": {
+      "major": { "type": "integer" },
+      "minor": { "type": "integer" },
+      "patch": { "type": "integer" }
+    },
+    "required": ["major", "minor", "patch"]
+  },
+  "usage": { "input_tokens": 10522, "output_tokens": 354, "thinking_tokens": 329, "cache_read_tokens": 8112, "total_tokens": 10876 }
+}
+```
+
+The flag accepts a schema string, a path to a `.json` schema file, or a primitive type name (`string`, `number`, `integer`, `boolean`). Read the parsed value from `structured_output`:
+
+```
+agy -p "Parse the semantic version string v2.14.3 into an object with integer fields major, minor, and patch." \
+  --output-format json \
+  --json-schema '{"type":"object","properties":{"major":{"type":"integer"},"minor":{"type":"integer"},"patch":{"type":"integer"}},"required":["major","minor","patch"]}' \
+  | jq '.structured_output'
+```
+
+### Streaming JSON
+
+Set `--output-format stream-json` to emit one JSON object per line (NDJSON) as the run progresses. Use this format to observe tool calls and token usage in real time.
+
+```
+agy -p "In one sentence, what is a git rebase?" --output-format stream-json
+```
+
+The stream begins with one `init` event, followed by any number of `step_update` events, and ends with one `result` event (the `cwd` and `tools` array are abbreviated in the following example):
+
+```
+{"event":"init","conversation_id":"c3b66b04-872b-4fbe-a3a4-058a026ef20a","init":{"cwd":"/home/user/project","tools":["ask_permission","run_command","write_to_file","..."],"permission_mode":"request-review"}}
+{"event":"step_update","step_update":{"conversation_id":"c3b66b04-872b-4fbe-a3a4-058a026ef20a","step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"c3b66b04-872b-4fbe-a3a4-058a026ef20a","step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"Git rebase destructively rewrites a branch's commit history by systematically detaching its unique commits and sequentially reapplying them onto a new base commit.\n","duration_seconds":6.28,"usage":{"input_tokens":10302,"output_tokens":582,"thinking_tokens":551,"cache_read_tokens":8113,"total_tokens":10884}}}
+{"event":"step_update","step_update":{"conversation_id":"c3b66b04-872b-4fbe-a3a4-058a026ef20a","step_index":4,"state":"DONE","step_type":"checkpoint","duration_seconds":0.53,"usage":{"input_tokens":116,"output_tokens":7,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":123}}}
+{"event":"result","result":{"conversation_id":"c3b66b04-872b-4fbe-a3a4-058a026ef20a","status":"SUCCESS","response":"Git rebase destructively rewrites a branch's commit history by systematically detaching its unique commits and sequentially reapplying them onto a new base commit.\n","duration_seconds":6.88,"num_turns":1,"usage":{"input_tokens":10418,"output_tokens":589,"thinking_tokens":551,"cache_read_tokens":8113,"total_tokens":11007}}}
+```
+
+When the response streams in chunks, the `agent_response` step emits one or more `ACTIVE` events carrying partial `text_delta` fragments before its final `DONE`; short responses like this one arrive in a single `DONE`.
+
+Every line is an event object whose `event` field names its type:
+
+| `event` | Payload key | Emitted |
+| --- | --- | --- |
+| `init` | `init` | Once, at stream start |
+| `step_update` | `step_update` | For each step transition or text delta |
+| `result` | `result` | Once, at the end (same shape as `json`) |
+
+The `init` payload records the run configuration. `model` and `agent` appear only when set with `--model` or `--agent`; `permission_mode` is `request-review` by default (and `always-proceed` under `--dangerously-skip-permissions`):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `cwd` | string | Working directory |
+| `tools` | string\[\] | Names of all available tools |
+| `permission_mode` | string | Effective permission mode |
+| `model` | string | Model in use, when overridden |
+| `agent` | string | Active agent, when overridden |
+| `json_schema` | object | Enforced schema, when set with `--json-schema` |
+
+Each `step_update` payload describes one step. Observed `step_type` values include `user_input`, `agent_response`, `tool`, and `checkpoint`; `state` is `ACTIVE` while a step runs and `DONE` when it finishes:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `conversation_id` | string | ID of the conversation |
+| `step_index` | number | Zero-based index of the step |
+| `state` | string | `ACTIVE` or `DONE` |
+| `step_type` | string | Step category, for example `agent_response` or `tool` |
+| `tool_name` | string | Canonical tool name, on tool steps |
+| `text_delta` | string | Incremental response text |
+| `duration_seconds` | number | Step duration, when known |
+| `usage` | object | Per-step token usage, when known |
+| `tool_info` | object | Tool invocation details |
+| `subagent_info` | object | Subagent invocation details |
+
+#### Tool calls in the stream
+
+On tool steps, `tool_info` carries the call and its result. This is a real tool step from a run that executed `echo hello_headless_demo`:
+
+```
+{"event":"step_update","step_update":{"conversation_id":"edb1c8c1-50ba-4f3f-87eb-412d0e9d47c3","step_index":4,"state":"DONE","step_type":"tool","tool_name":"run_command","duration_seconds":0.07,"tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hello_headless_demo"},"output":"hello_headless_demo\r\n"}}}
+```
+
+`tool_info` holds `name`, `parameters`, `output`, and—when the tool fails—an `error` object with `type` and `message`. Steps that spawn subagents carry `subagent_info` instead, listing each subagent under `subagents` (with `type_name`, `role`, `conversation_id`, `log_uri`, and `workspace_uris`).
+
+#### Structured output in the stream
+
+With `--json-schema`, the schema applies to the terminal `result` event, which carries the same `structured_output` and `json_schema` fields as the `json` envelope.
+
+## Parse output with jq
+
+`stdout` is machine-readable, so `jq` extracts what you need.
+
+Get the response text from a JSON run:
+
+```
+agy -p "Name three popular version control systems, comma-separated." --output-format json | jq -r '.response'
+```
+
+```
+Git, Subversion, Mercurial.
+```
+
+Concatenate streaming text as it arrives:
+
+```
+agy -p "Explain what a merge conflict is in two sentences." --output-format stream-json \
+  | jq -j 'select(.event=="step_update") | .step_update.text_delta // empty'
+```
+
+Read token usage from the terminal `result` event:
+
+```
+agy -p "In one sentence, what is a git rebase?" --output-format stream-json \
+  | jq 'select(.event=="result") | .result.usage'
+```
+
+> **Tip:** Use `jq -j` (join output) when concatenating `text_delta` fragments so `jq` doesn’t insert newlines between them.
+
+## Continue a conversation
+
+Headless runs are stateless by default. Resume prior context with `--continue` (`-c`) for the most recent conversation, or `--conversation` with an ID from a previous run’s `conversation_id`:
+
+```
+# Continue the most recent conversation.
+agy -p "Now explain your previous answer in more detail" --continue
+
+# Resume a specific conversation by ID.
+agy -p "Summarize what we discussed" --conversation 055a398f-db14-4c5f-abbb-1bf03f8120a7
+```
+
+Each of these starts a new process. To run multiple turns inside one process, refer to [Stream prompts from stdin](#stream-prompts-from-stdin).
+
+## Stream prompts from stdin
+
+Use `--input-format stream-json` to maintain a single, continuous conversation process, feeding it prompts one by one on standard input (stdin). Each prompt executes a full turn and emits its own `result` event.
+
+This approach is ideal for applications that dynamically determine the next prompt based on the previous answer. Because the process only starts once, subsequent turns skip startup overhead and reuse the warmed-up conversation. This makes it significantly faster than running repeated commands with `--continue`.
+
+> **Note:** `--input-format stream-json` requires `--output-format stream-json`. In a streaming session, the CLI emits one `result` event per turn.
+
+### Send a prompt
+
+Write one JSON object per line to `stdin`. The `event` key specifies the message type (matching the output stream format). A prompt is represented as a `user` event with a `message`:
+
+```
+{ "event": "user", "message": { "content": "Reply with exactly the word: apple. Nothing else." } }
+```
+
+You can pipe multiple prompts into a single session:
+
+```
+printf '%s\n' \
+  '{"event":"user","message":{"content":"Reply with exactly the word: apple. Nothing else."}}' \
+  '{"event":"user","message":{"content":"What word did I ask you to reply with in my previous message? Answer with just that word."}}' \
+  | agy --input-format stream-json --output-format stream-json
+```
+
+The `content` field accepts either a standard string or a list of text blocks. The following two formats are equivalent:
+
+```
+{ "event": "user", "message": { "content": "Reply with exactly: banana" } }
+{ "event": "user", "message": { "content": [{ "type": "text", "text": "Reply with exactly: banana" }] } }
+```
+
+`text` is the only supported block type. Submitting any other block type ends the session with an error message rather than silently dropping the block. This ensures the agent never answers a prompt you didn’t explicitly send.
+
+### Read the results
+
+The output stream works as follows:
+
+1.  Opens with a single `init` event.
+2.  Emits a series of `step_update` events for the active turn.
+3.  Concludes the turn with a final `result` event.
+
+This example shows the output from the two-prompt Bash command in the previous section (with the `init` payload abbreviated):
+
+```
+{"event":"init","conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","init":{"cwd":"/home/user/project","tools":["ask_permission","run_command","write_to_file","..."],"permission_mode":"request-review"}}
+{"event":"step_update","step_update":{"conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"apple"}}
+{"event":"step_update","step_update":{"conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"\n","duration_seconds":1.169607627,"usage":{"input_tokens":30384,"output_tokens":4,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":30388}}}
+{"event":"result","result":{"conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","status":"SUCCESS","response":"apple\n","duration_seconds":1.427806958,"num_turns":1,"usage":{"input_tokens":30384,"output_tokens":4,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":30388}}}
+{"event":"step_update","step_update":{"conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","step_index":3,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","step_index":4,"state":"DONE","step_type":"agent_response","text_delta":"apple\n","duration_seconds":0.895679386,"usage":{"input_tokens":278,"output_tokens":4,"thinking_tokens":0,"cache_read_tokens":30214,"total_tokens":282}}}
+{"event":"result","result":{"conversation_id":"9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f","status":"SUCCESS","response":"apple\n","duration_seconds":2.548755756,"num_turns":2,"usage":{"input_tokens":30662,"output_tokens":8,"thinking_tokens":0,"cache_read_tokens":30214,"total_tokens":30670}}}
+```
+
+The second turn answers `apple` from the first turn’s context. Notice that a single `conversation_id` tracks the entire session, and `init` is only sent once.
+
+When parsing the result object, keep in mind that the response text applies only to the current turn, while metadata counters track the cumulative session:
+
+| Field | Scope |
+| --- | --- |
+| `response` | The turn that emitted it |
+| `num_turns` | Cumulative over the session |
+| `usage` | Cumulative over the session |
+| `duration_seconds` | Cumulative over the session |
+
+To filter and only view the final responses, you can pipe the output through `jq`:
+
+```
+printf '%s\n' \
+  '{"event":"user","message":{"content":"Reply with exactly: one"}}' \
+  '{"event":"user","message":{"content":"Reply with exactly: two"}}' \
+  | agy --input-format stream-json --output-format stream-json \
+  | jq -r 'select(.event=="result") | "\(.result.num_turns): \(.result.response)"'
+```
+
+```
+1: one
+
+2: two
+```
+
+### Drive a session programmatically
+
+Instead of passing all prompts up front, you can hold the `stdin` pipe open in a script. This allows your application to evaluate the model’s answer before submitting the next prompt.
+
+> **Tip:** You can read `stdout` line by line and dispatch logic based on the `event` field. Wait until you receive the `result` event for the current prompt before writing the next one.
+
+For example:
+
+```
+import json
+import subprocess
+
+proc = subprocess.Popen(
+    ["agy", "--input-format", "stream-json", "--output-format", "stream-json"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    text=True,
+    bufsize=1,
+)
+
+
+def ask(prompt):
+    """Send one prompt and return the response for that turn."""
+    message = {"event": "user", "message": {"content": prompt}}
+    proc.stdin.write(json.dumps(message) + "\n")
+    proc.stdin.flush()
+    for line in proc.stdout:
+        event = json.loads(line)
+        if event["event"] == "result":
+            return event["result"]["response"]
+
+
+first = ask("Name one popular version control system. Answer with one word.")
+print(ask(f"Name a competitor to {first.strip()}. Answer with one word."))
+
+proc.stdin.close()
+proc.wait()
+```
+
+### End a session
+
+To close a session gracefully, close `stdin`. The process exits after the input pipe is closed and the current turn completes. If an application writes a final prompt and immediately closes the pipe, it still receives the final `result` before the process terminates.
+
+Clean sessions exit with `0`, which matches the standard headless mode behavior.
+
+### Unsupported messages
+
+To prevent unpredictable behavior, the CLI validates inputs. If it encounters a malformed or unsupported message, it responds as described in the following table:
+
+| Input | Result | Exit |
+| --- | --- | --- |
+| Unrecognized `event` name | Skipped: warning logged to `stderr` | — |
+| `control_request` or `control_response` events | `ERROR` result, session ends | `2` |
+| Slash command handled by the CLI such as `/model` | `ERROR` result, session ends | `2` |
+| Message missing the `event` field | `ERROR` result, session ends | `1` |
+| Invalid JSON line | `ERROR` result, session ends | `1` |
+| Content block type other than `text` | `ERROR` result, session ends | `1` |
+
+Unrecognized `event` names are safely skipped with a warning. This ensures that applications built against newer versions of the streaming protocol don’t crash when running on older CLI versions:
+
+```
+warning: ignoring unsupported stream input message event "future_thing"
+```
+
+For all other errors, the session terminates immediately. Any turns that previously completed retain their `result` events, but the malformed input line aborts the remainder of the session.
+
+Slash commands that the CLI can respond to directly (such as `/model` and `/usage`) produce a text report rather than a standard event stream. A streaming session can’t use these types of slash commands. For example:
+
+```
+{ "event": "result", "result": { "conversation_id": "4fae3a70-409d-42a4-86ea-9de206a49ff4", "status": "ERROR", "response": "", "error": "/model is answered by the CLI itself and is unavailable with --input-format stream-json; run it as its own --print /model invocation", "duration_seconds": 0, "num_turns": 0, "usage": { "input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 0 } } }
+```
+
+### Common mistakes
+
+| Mistake | Why it fails | How to fix it |
+| :-- | :-- | :-- |
+| **Pairing with `--output-format json` or `text`** | Those formats only emit a single output envelope when the process exits, causing every turn except the last one to be lost. | Always use `--output-format stream-json` with this input mode. |
+| **Passing a prompt with the `-p` flag** | Streaming mode exclusively listens for prompts on `stdin`. Any prompt passed through a command-line flag is dropped. | Send the prompt into `stdin` as a `user` message instead. |
+| **Sending `/model` or `/usage` into the stream** | The CLI handles these commands internally outside of the event stream, breaking the JSON flow. | Run `agy -p /model` as an entirely separate, standalone command. |
+| **Treating `num_turns` as a per-turn count** | Metadata counters (like turns, duration, and usage) track the entire cumulative session, not just the active turn. | Use the `response` field to get the text for the current turn. |
+| **Waiting for the process to exit before reading `stdout`** | The session stays open indefinitely until `stdin` is closed. If your script waits for an exit signal, it hangs. | Read the events line-by-line as they arrive, and manually close `stdin` when finished. |
+
+## Select a model, effort, or agent
+
+List the available model slugs, then pin one for the run:
+
+```
+agy models
+```
+
+```plaintext
+gemini-3.8-flash-high     Gemini 3.8 Flash (High)
+gemini-3.8-flash-medium   Gemini 3.8 Flash (Medium)
+gemini-3.7-flash-high     Gemini 3.7 Flash (High)
+gemini-3.7-flash-medium   Gemini 3.7 Flash (Medium)
+gemini-3.6-flash-high     Gemini 3.6 Flash (High)
+gemini-3.6-flash-medium   Gemini 3.6 Flash (Medium)
+gemini-3.1-pro-high       Gemini 3.1 Pro (High)
+...
+```
+
+```
+# Pin a model by slug.
+agy -p "Reverse the string antigravity." --model gemini-3.8-flash-medium
+
+# Set reasoning effort (low, medium, or high).
+agy -p "Outline a plan to add caching to this service." --effort high
+
+# Select an agent (list them with `agy agents`).
+agy -p "Review this function for edge cases." --agent <agent-name>
+```
+
+Unlike the interactive UI, headless mode doesn’t silently fall back when `--model` names an unknown model. It exits non-zero with an `ERROR` status so a pinned pipeline fails loudly instead of running the wrong model.
+
+## Permissions in headless mode
+
+There is no interactive prompt in headless mode, so tools that would normally ask for confirmation are handled by policy.
+
+By default, the CLI respects the permission mode in your settings. A tool that requires approval it can’t obtain is soft-denied: the run continues, exits `0`, and prints a notice to `stderr` naming the tool and how to allow it. Reading and writing files inside your active workspace is auto-allowed; actions such as shell commands default to **Ask** and are soft-denied in headless mode unless you grant them.
+
+Grant a tool ahead of time by adding an `action(target)` rule under `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`:
+
+```
+{
+  "permissions": {
+    "allow": [
+      "command(git)",
+      "command(regex:npm run (build|lint|test))",
+      "write_file(src/)"
+    ]
+  }
+}
+```
+
+To auto-approve every tool for a run, pass `--dangerously-skip-permissions`:
+
+```
+agy -p "Run the test suite and report failures" --dangerously-skip-permissions
+```
+
+> **Warning:** `--dangerously-skip-permissions` approves all tool calls, including file writes and command execution. Prefer scoped `permissions.allow` rules unless you fully trust the prompt and environment. Refer to [Permissions](/docs/cli/permissions) for the full rule syntax.
+
+## Handle exit codes and errors
+
+A successful run exits `0`. A run that fails to produce a response exits non-zero and writes the reason to `stderr`. In `json` and `stream-json` modes, the failure also appears in the `status` and `error` fields.
+
+For example, pinning an unknown model exits `1` and returns an error envelope:
+
+```
+agy -p "hi" --model does-not-exist-model --output-format json; echo "exit=$?"
+```
+
+```
+{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \"does-not-exist-model\" --effort \"\"): model does-not-exist-model is not recognized as a known model or custom model in settings\nAvailable models:\n  Gemini 3.6 Flash (High)\n  ...","duration_seconds":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0}}
+```
+
+```
+exit=1
+```
+
+The `status` field reports the terminal state of the run:
+
+| Status | Meaning |
+| --- | --- |
+| `SUCCESS` | The run completed and produced a response |
+| `ERROR` | The run ended with an error |
+| `CANCELED` | The run was canceled |
+| `INTERRUPTED` | The run was interrupted (for example, `SIGINT`) |
+| `INVALID` | The run reached an invalid state |
+| `WAITING` | The run ended while waiting on input |
+| `RUNNING` | The run did not reach a terminal state |
+
+By default, a run waits up to five minutes for a response. Adjust the ceiling with `--print-timeout`:
+
+```
+agy -p "Summarize the design tradeoffs of optimistic locking." --print-timeout 15m
+```
+
+## Flag reference
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-p`, `--print`, `--prompt` | — | Run a single prompt non-interactively and print the response |
+| `--output-format` | `text` | Output format: `text`, `json`, or `stream-json` |
+| `--input-format` | `text` | Input format: `text` or `stream-json`; reads prompts on stdin |
+| `--json-schema` | — | Schema string or file path to enforce structured output |
+| `--model` | — | Model slug for this run (refer to `agy models`) |
+| `--effort` | — | Reasoning effort: `low`, `medium`, or `high` |
+| `--agent` | — | Agent for this run (refer to `agy agents`) |
+| `--continue`, `-c` | `false` | Continue the most recent conversation |
+| `--conversation` | — | Resume a conversation by ID |
+| `--dangerously-skip-permissions` | `false` | Auto-approve all tool permission requests |
+| `--print-timeout` | `5m` | Maximum time to wait for a response |
+| `--sandbox` | `false` | Run with terminal sandbox restrictions enabled |
+
+## Example: run the agent in CI
+
+Fail the job on error and save the response:
+
+```
+#!/usr/bin/env bash
+set -euo pipefail
+
+result=$(agy -p "Name three popular version control systems, comma-separated." \
+  --output-format json \
+  --print-timeout 10m)
+
+status=$(echo "$result" | jq -r '.status')
+if [[ "$status" != "SUCCESS" ]]; then
+  echo "Agent run failed: $(echo "$result" | jq -r '.error')" >&2
+  exit 1
+fi
+
+echo "$result" | jq -r '.response' > result.txt
+```
+
+## Next steps
+
+Explore the following guides to learn more about CLI capabilities:
+
+*   **[Prompting and interaction](/docs/cli/prompting)**: Write effective prompts for the agent.
+*   **[Permissions](/docs/cli/permissions)**: Configure allow, deny, and ask rules.
+*   **[Background tasks and subagents](/docs/cli/subagents)**: Delegate work to specialized agents.
+*   **[Reference](/docs/cli/reference)**: Full command and flag reference.
+
+
+> ## Documentation Index
+> Fetch the complete documentation index at: https://code.claude.com/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Run Claude Code programmatically
+
+> Use the Agent SDK to run Claude Code programmatically from the CLI, Python, or TypeScript.
+
+The [Agent SDK](/docs/en/agent-sdk/overview) gives you the same tools, agent loop, and context management that power Claude Code. It's available as a CLI for scripts and CI/CD, or as [Python](/docs/en/agent-sdk/python) and [TypeScript](/docs/en/agent-sdk/typescript) packages for full programmatic control.
+
+To run Claude Code in non-interactive mode, pass `-p` with your prompt and the [CLI options](/docs/en/cli-reference) you need:
+
+```bash theme={null}
+claude -p "Find and fix the bug in auth.py" --allowedTools "Read,Edit,Bash"
+```
+
+This page covers using the Agent SDK via the CLI (`claude -p`). For the Python and TypeScript SDK packages with structured outputs, tool approval callbacks, and native message objects, see the [full Agent SDK documentation](/docs/en/agent-sdk/overview).
+
+## Basic usage
+
+Add the `-p` (or `--print`) flag to any `claude` command to run it non-interactively. Not every [CLI option](/docs/en/cli-reference) combines with `-p`. Claude Code rejects `--bg`, and rejects `--cloud` with a task description, with an error naming the conflict; `--cloud` with a session ID and `-p` instead [queues a message into that cloud session](/docs/en/claude-code-on-the-web#send-follow-ups-from-the-cli) and exits. Options you'll combine with `-p` often include:
+
+* `--continue` for [continuing conversations](#continue-conversations)
+* `--allowedTools` for [auto-approving tools](#auto-approve-tools)
+* `--output-format` for [structured output](#get-structured-output)
+
+This example asks Claude a question about your codebase and prints the response:
+
+```bash theme={null}
+claude -p "What does the auth module do?"
+```
+
+Claude Code exits with code 0 on success and a non-zero code when the run fails, so your scripts can branch on the exit status. If you pass an invalid flag, Claude Code reports the error to stderr before the run starts. When a failure happens inside the run, such as missing authentication, Claude Code prints the failure as the result on stdout.
+
+### Start faster with bare mode
+
+Add `--bare` to reduce startup time by skipping auto-discovery of hooks, skills, custom commands, [subagents](/docs/en/sub-agents), installed plugins, MCP servers, auto memory, and CLAUDE.md. Without it, `claude -p` loads the same [context](/docs/en/how-claude-code-works#the-context-window) an interactive session would, including anything configured in the working directory or `~/.claude`.
+
+Bare mode is useful for CI and scripts where you need the same result on every machine. A hook in a teammate's `~/.claude` or an MCP server in the project's `.mcp.json` won't run, because bare mode never reads them. A directory you name with `--add-dir` is a partial exception: bare mode loads skills from its `.claude/skills/` folder, but still skips its `.claude/commands/` and `.claude/agents/` folders. [Skills from additional directories](/docs/en/skills#skills-from-additional-directories) covers what does and doesn't load.
+
+Without `--bare`, a `-p` session runs the hooks in a project's `.claude/settings.json` and connects the servers in its `.mcp.json`, even in a folder you've never trusted. A `-p` session shows no workspace trust dialog and no per-server approval prompt. [What runs before you trust a folder](/docs/en/permissions#what-runs-before-you-trust-a-folder) covers each kind of repository content under `-p` and how to keep it out.
+
+This example runs a one-off summarize task in bare mode and pre-approves the Read tool so the call completes without a permission prompt. Set `ANTHROPIC_API_KEY` before running it, because bare mode doesn't use your subscription login:
+
+```bash theme={null}
+claude --bare -p "Summarize README.md" --allowedTools "Read"
+```
+
+In bare mode, Claude Code never reads OAuth credentials or the system keychain. For the Anthropic API, set `ANTHROPIC_API_KEY` in the environment, with a key created in the [Claude Console](https://platform.claude.com), or supply an `apiKeyHelper` in the `--settings` JSON. Amazon Bedrock, Google Cloud's Agent Platform, and Microsoft Foundry continue to read their own provider credentials as usual.
+
+In bare mode Claude has access to the Bash, file read, and file edit tools. Pass any context you need with a flag:
+
+| To load | Use |
+| - | - |
+| System prompt additions | `--append-system-prompt`, `--append-system-prompt-file` |
+| Settings | `--settings <file-or-json>` |
+| MCP servers | `--mcp-config <file-or-json>` |
+| [Custom agents](/docs/en/sub-agents#choose-the-subagent-scope) | `--agents <file-or-json>` |
+| A plugin | `--plugin-dir <path>`, `--plugin-url <url>` |
+
+Bare mode also limits what happens while the session runs:
+
+* **MCP servers**: only servers supplied on the command line connect, for example with `--mcp-config`. In an interactive session, Claude Code also skips the automatic IDE connection unless you pass `--ide`.
+* **System reminders**: Claude gets your prompts and the tool results without the [system reminders](/docs/en/glossary#system-reminder) Claude Code would add alongside them. For example, Claude isn't told when a file it read earlier changes on disk, and it doesn't get the list of available skills, including skills from an `--add-dir` folder.
+* **Background tasks**: none run. A command that reaches its [timeout](/docs/en/tools-reference#timeout-and-output-limits) stops instead of [moving to the background](/docs/en/tools-reference#background-commands).
+
+Before v2.1.286, these limits held only partly: an interactive `--bare` session connected the MCP servers that a normal session would, every `--bare` session sent system reminders, and background tasks stayed available.
+
+<Note>
+  `--bare` is the recommended mode for scripted and SDK calls, and will become the default for `-p` in a future release.
+</Note>
+
+### Background tasks at exit
+
+After Claude finishes its turn and stdin has closed, a `claude -p` run can stay open to wait for background work that Claude started.
+
+Unless a background command that the main conversation started is still running, Claude Code stops whatever is still running after 10 minutes of continuous idle waiting by default and drops its partial result. To change the 10-minute cap, set [`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`](/docs/en/env-vars), or set it to `0` to wait without one.
+
+The run waits for background work such as background commands, subagents and workflows, Monitor watches, and pending `/loop` wakeups:
+
+* **[Background commands](/docs/en/tools-reference#background-commands)**: for a command that the main conversation started, for example a dev server or a watch build, the run waits until the command exits or reaches its [time limit](/docs/en/tools-reference#time-limit-for-background-commands). Claude then takes one more turn with the outcome. While the command runs, the 10-minute cap doesn't end the wait.
+* **Background [subagents](/docs/en/sub-agents) and workflows**: the run stays open until that work completes, because its result is part of the final output.
+* **[Monitor](/docs/en/tools-reference#monitor-tool) watches**: the run waits until the watch times out or the 10-minute cap ends the wait, whichever comes first. While it waits, Claude keeps responding to what the watch reports. By default, a watch times out five minutes after Claude starts it.
+* **Pending wakeups**: in a run whose prompt you passed as text rather than with `--input-format stream-json`, when Claude has scheduled a [self-paced `/loop` wakeup](/docs/en/scheduled-tasks#let-claude-choose-the-interval), the run waits for each wakeup to fire and runs its iteration until the [loop ends](/docs/en/scheduled-tasks#stop-a-loop), even past the 10-minute cap.
+
+When stderr is a terminal and the run has waited five seconds, Claude Code prints a line to stderr that starts with `Waiting for background work to finish` and names the work. With [`json` or `stream-json` output](#get-structured-output), the line prints only when stdout isn't a terminal, so the JSON your script reads never carries it.
+
+If the run reaches its [`--max-budget-usd`](/docs/en/cli-reference#cli-flags) cap, Claude Code stops the remaining background work instead of waiting.
+
+When background work starts another turn, the run prints each turn's result with the default `text` output and the last turn's result with `json` output. Before v2.1.295, the run printed only the last turn's result with `text` output too.
+
+### Stop a run with SIGTERM
+
+If you stop a `claude -p` run with SIGTERM, for example with `kill` or from a process supervisor, Claude Code exits with code 143. Claude Code leaves the turn that was in progress unfinished and records no result for it. To end the turn instead, send SIGINT, or call the Agent SDK's `interrupt()`, before you stop the process.
+
+On SIGTERM, Claude Code terminates the process tree of any Bash command that is still running. Claude Code then runs [`SessionEnd` hooks](/docs/en/hooks#sessionend) and exits. While exiting, Claude Code starts no new tool call, sends no new model request, and runs no hook other than `SessionEnd`. If the run was in the middle of a command or waiting on a permission prompt when the signal arrived, Claude Code handles that step as follows:
+
+* **Running a command**: Claude Code records the command as killed in the session.
+* **Waiting for an answer to a permission prompt**: if you send SIGTERM to the process, Claude Code leaves the prompt unanswered. If your program closes the session through the Agent SDK, the SDK ends Claude Code's input before sending any signal, and Claude Code cancels the prompt as soon as the input ends.
+
+When you [resume the session](#continue-conversations), Claude Code leaves the interrupted turn as it is, and your next prompt drives the conversation. To have Claude Code continue the interrupted turn on resume instead, set [`CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`](/docs/en/env-vars).
+
+### If the working directory is deleted
+
+If the working directory of a `claude -p` or Agent SDK session is deleted mid-session, the session keeps running. When a turn starts while the directory is missing, Claude Code emits a [warning message](/docs/en/agent-sdk/typescript#sdkinformationalmessage) in `stream-json` output, and shell commands fail until the directory exists again.
+
+## Examples
+
+These examples highlight common CLI patterns. Where a command names a file such as `auth.py` or `build-error.txt`, substitute a file from your own project. In CI or other scripted environments, add [`--bare`](#start-faster-with-bare-mode) so Claude Code starts without loading the host's hooks, plugins, auto memory, or `CLAUDE.md`.
+
+### Pipe data through Claude
+
+Non-interactive mode reads stdin, so you can pipe data in and redirect the response out like any other command-line tool.
+
+This example pipes a build log into Claude and writes the explanation to a file:
+
+```bash theme={null}
+cat build-error.txt | claude -p 'concisely explain the root cause of this build error' > output.txt
+```
+
+With `--output-format json`, the response payload includes `total_cost_usd` and a per-model cost breakdown, so scripted callers can track spend without consulting the [usage dashboard](/docs/en/costs). When you continue an earlier conversation with `--continue` or `--resume`, the run reports the conversation's whole total, [earlier runs' spend included](/docs/en/agent-sdk/cost-tracking#accumulate-costs-across-multiple-calls). Both figures are [client-side estimates](/docs/en/agent-sdk/cost-tracking) and can differ from your actual bill.
+
+<Note>
+  Piped stdin is capped at 10MB. If you exceed the cap, Claude Code exits with a clear error and a non-zero status. To work with larger inputs, write the content to a file and reference the file path in your prompt instead of piping it.
+</Note>
+
+If Claude Code can't read stdin, for example because the process that started it disconnected its end, Claude Code prints a warning to stderr and continues with the prompt from the command line. Before v2.1.211, an unreadable stdin on Windows crashed the session or made it exit silently with no output.
+
+### Add Claude to a build script
+
+You can wrap a non-interactive call in a script to use Claude as a project-specific linter or reviewer.
+
+This `package.json` script pipes the diff against `main` into Claude and asks it to report typos. Piping the diff means Claude doesn't need Bash permission to read it, and the escaped double quotes keep the script portable to Windows:
+
+```json theme={null}
+{
+  "scripts": {
+    "lint:claude": "git diff main | claude -p \"you are a typo linter. for each typo in this diff, report filename:line on one line and the issue on the next. return nothing else.\""
+  }
+}
+```
+
+Run it with `npm run lint:claude`.
+
+### Get structured output
+
+Use `--output-format` to control how responses are returned:
+
+* `text` (default): plain text output
+* `json`: structured JSON with result, session ID, and metadata
+* `stream-json`: newline-delimited JSON for real-time streaming
+
+This example returns a project summary as JSON with session metadata, with the text result in the `result` field:
+
+```bash theme={null}
+claude -p "Summarize this project" --output-format json
+```
+
+To get output conforming to a specific schema, use `--output-format json` with `--json-schema` and a [JSON Schema](https://json-schema.org/) definition. The response includes metadata about the request (session ID, usage, etc.) with the structured output in the `structured_output` field.
+
+This example extracts function names and returns them as an array of strings:
+
+```bash theme={null}
+claude -p "Extract the main function names from auth.py" \
+  --output-format json \
+  --json-schema '{"type":"object","properties":{"functions":{"type":"array","items":{"type":"string"}}},"required":["functions"]}'
+```
+
+If the value isn't a valid JSON Schema, `claude` exits with `Error: --json-schema is not a valid JSON Schema` followed by the validator's diagnostic. Claude Code accepts schemas that use the `format` keyword, such as `"format": "email"`, but treats `format` as an annotation and doesn't enforce it. Before v2.1.205, Claude Code silently ignored an invalid schema and returned unstructured text, and treated any schema containing `format` as invalid.
+
+<Tip>
+  Use a tool like [jq](https://jqlang.org/) to parse the response and extract specific fields:
+
+  ```bash theme={null}
+  # Extract the text result
+  claude -p "Summarize this project" --output-format json | jq -r '.result'
+
+  # Extract structured output
+  claude -p "Extract function names from auth.py" \
+    --output-format json \
+    --json-schema '{"type":"object","properties":{"functions":{"type":"array","items":{"type":"string"}}},"required":["functions"]}' \
+    | jq '.structured_output'
+  ```
+</Tip>
+
+### Stream responses
+
+Use `--output-format stream-json` with `--verbose` and `--include-partial-messages` to receive tokens as they're generated. Each line is a JSON object representing an event:
+
+```bash theme={null}
+claude -p "Explain recursion" --output-format stream-json --verbose --include-partial-messages
+```
+
+The last line of the stream is a `result` message with the final response text, cost, and session metadata.
+
+If your consumer reads the stream slowly, Claude Code waits for the queued output to drain before exiting, scaling the wait with how much is still queued, capped at 30 seconds. Before v2.1.214 the exit wait was capped at about two seconds, which could cut off the end of a large response.
+
+The following example uses [jq](https://jqlang.org/) to filter for text deltas and display only the streaming text. The `-r` flag outputs raw strings (no quotes) and `-j` joins without newlines so tokens stream continuously:
+
+```bash theme={null}
+claude -p "Write a poem" --output-format stream-json --verbose --include-partial-messages | \
+  jq -rj 'select(.type == "stream_event" and .event.delta.type? == "text_delta") | .event.delta.text'
+```
+
+For programmatic streaming with callbacks and message objects, see [Stream responses in real-time](/docs/en/agent-sdk/streaming-output) in the Agent SDK documentation.
+
+#### Follow subagent messages
+
+Messages from [subagents](/docs/en/sub-agents) and from skills that [run in a subagent](/docs/en/skills#run-skills-in-a-subagent) appear in the stream as `assistant` and `user` messages. Their `parent_tool_use_id` field says which run each one belongs to. Messages from the main conversation carry `null` in that field.
+
+The first message from a forked skill, or from a subagent running in the [foreground](/docs/en/sub-agents#run-subagents-in-foreground-or-background), is a `user` message carrying the prompt or skill content that drives it. After that first message, Claude Code emits:
+
+* **By default**: the run's `tool_use` and `tool_result` blocks.
+* **With [`--forward-subagent-text`](/docs/en/cli-reference#cli-flags) or [`CLAUDE_CODE_FORWARD_SUBAGENT_TEXT`](/docs/en/env-vars)**: the run's text and thinking blocks too, so you can reconstruct each run's transcript.
+
+When you enable either option, Claude Code forwards messages from [subagents at every nesting depth](/docs/en/sub-agents#let-subagents-spawn-their-own-subagents), whether each one was spawned with the Agent tool or started as a forked skill. In `parent_tool_use_id`, the nested subagent's messages carry the ID of the Agent or Skill tool call that started it, so you can rebuild the full nesting tree by following those IDs.
+
+A run that Claude starts with a tool call carries that tool call's ID. A forked skill that you start by passing `/<skill-name>` as the prompt has no tool call, so its messages carry a `forked-command-` value instead and arrive after it finishes. Find how the run started in the first column:
+
+| How the run starts | `parent_tool_use_id` | When its messages arrive |
+| :- | :- | :- |
+| Claude calls the Agent tool from the main conversation | The ID of that Agent `tool_use` block | While the subagent works |
+| Claude calls the Skill tool for a forked skill from the main conversation | The ID of that Skill `tool_use` block | While the forked skill works |
+| You pass `/<skill-name>` as the prompt | A value that starts with `forked-command-` | Together and in order after the forked skill finishes |
+
+For a forked skill started from the prompt, match `parent_tool_use_id` on the `forked-command-` prefix, because the name after it can differ from the one you typed.
+
+If some of these messages are missing from your stream, check your Claude Code version against these minimums:
+
+* **`--forward-subagent-text` and `CLAUDE_CODE_FORWARD_SUBAGENT_TEXT`**: v2.1.211 or later
+* **Forwarding at every nesting depth**: v2.1.219 or later
+* **A forked skill that Claude starts with the Skill tool from the main conversation**: v2.1.86 or later for its `tool_use` and `tool_result` blocks, and v2.1.265 or later for its first `user` message and its text and thinking blocks
+* **Messages of subagents that a forked skill spawns, and of forked skills started inside a subagent or another forked skill**: v2.1.275 or later
+* **Messages of a forked skill you start by passing `/<skill-name>` as the prompt**: v2.1.287 or later
+
+#### Handle API retries
+
+When an API request fails with a retryable error, Claude Code emits a `system/api_retry` event before retrying. On v2.1.246 or later, when a `401` or `403` rejects an [`apiKeyHelper`](/docs/en/settings-reference#apikeyhelper) credential, Claude Code makes the first two retries quietly with no event, then emits the event as usual from the third consecutive retry onward. The quiet retries still count toward `attempt`. You can use the event to show retry progress in your own interface.
+
+| Field | Type | Description |
+| - | - | - |
+| `type` | `"system"` | message type |
+| `subtype` | `"api_retry"` | identifies this as a retry event |
+| `attempt` | integer | current attempt number, starting at 1 |
+| `max_retries` | integer | total retries permitted for this failure's cause |
+| `retry_delay_ms` | integer | milliseconds until the next attempt |
+| `error_status` | integer or null | HTTP status code of the failed attempt, or `null` when the attempt got no HTTP response from the API |
+| `no_response` | object, optional | present only when the failed attempt got [no response headers in time](/docs/en/errors#no-response-from-api). `waited_ms` is how long that attempt waited and `retry_wait_ms` is how long the retry will wait. Requires Claude Code v2.1.261 or later |
+| `error` | string | error category: `authentication_failed`, `oauth_org_not_allowed`, `account_on_hold`, `billing_error`, `rate_limit`, `overloaded`, `invalid_request`, `model_not_found`, `server_error`, `max_output_tokens`, `cloud_credential_error`, or `unknown` |
+| `uuid` | string | unique event identifier |
+| `session_id` | string | session the event belongs to |
+
+#### Read session metadata
+
+The `system/init` event reports session metadata including the model, tools, MCP servers, and loaded plugins. It is the first event in the stream unless startup events precede it:
+
+* `plugin_install` events, when [`CLAUDE_CODE_SYNC_PLUGIN_INSTALL`](/docs/en/env-vars) is set.
+* [`hook_started`, `hook_progress`, and `hook_response` events](/docs/en/agent-sdk/typescript#sdkhookstartedmessage), while a configured [`SessionStart`](/docs/en/hooks#sessionstart) or [`Setup`](/docs/en/hooks#setup) hook runs. These stream as the hook produces them. Claude Code v2.1.169 through v2.1.203 delivered them in one batch after the hook completed, still ahead of `system/init`; v2.1.204 restored live delivery.
+
+The event also carries an optional `capabilities` array of strings naming the protocol behaviors this Claude Code version implements, such as `interrupt_receipt_v1` or `interrupt_cancel_queued_v1`. Check it to feature-detect instead of comparing version strings, and ignore values you don't recognize. The field requires Claude Code v2.1.205 or later and is absent from earlier versions. See [`SDKSystemMessage`](/docs/en/agent-sdk/typescript#sdksystemmessage) for the capability list.
+
+#### Fail CI when a plugin or MCP server doesn't load
+
+Use the plugin fields in the `system/init` event to catch a plugin that didn't load:
+
+| Field | Type | Description |
+| - | - | - |
+| `plugins` | array | plugins that loaded successfully, each with `name` and `path` |
+| `plugin_errors` | array | plugin load-time errors, each with `plugin`, `type`, and `message`. Includes unsatisfied dependency versions and `--plugin-dir` load failures such as a missing path or invalid archive. A plugin that didn't load is absent from `plugins`. The key is omitted when there are no errors |
+
+When a `--plugin-dir` directory or archive itself fails to load, its `plugin_errors` entry includes the resolved absolute path as `path`. Use it to tell which of several `--plugin-dir` values failed. The `path` field requires Claude Code v2.1.283 or later.
+
+Use the MCP server fields the same way. When you pass [`--mcp-config`](/docs/en/cli-reference#cli-flags) with `-p`, Claude Code waits for still-pending servers before running the first turn, up to the [`MCP_TIMEOUT`](/docs/en/env-vars) startup timeout, 30 seconds by default. A remote server with a [cached tool list](/docs/en/agent-sdk/mcp#connection-timing) skips the wait, shows `pending` in `system/init`, and connects on its first tool call. In a [self-hosted environment](/docs/en/self-hosted-environments-configuration#connection-timing), a shorter wait applies instead. The wait requires Claude Code v2.1.221 or later.
+
+Claude Code validates each `--mcp-config` entry at startup and skips entries that fail validation, for example a `url` entry with no `type`. The run continues and exits cleanly, so check these fields to catch a server that never loaded:
+
+| Field | Type | Description |
+| - | - | - |
+| `mcp_servers` | array | MCP servers in the session, each with `name` and `status` |
+| `mcp_server_errors` | array | `--mcp-config` entries skipped by config validation, each with `name`, `type`, and `message`. `type` is a skip category such as `unknown_type`, `url_missing_type`, `invalid_config`, or `reserved_name`; treat values you don't recognize as a generic skip. Affected servers are absent from `mcp_servers`. The key is omitted when there are no errors, so a CI gate can fail on a non-empty array. Requires Claude Code v2.1.219 or later |
+
+When you run the command by hand in a terminal, Claude Code also prints a startup warning to stderr, such as `Warning: 1 MCP server skipped due to invalid config:`, followed by the reason for each skipped entry. When you redirect stderr, or when a program such as a CI runner or an SDK host captures it, Claude Code prints no warning and reports the skipped entries only in the `mcp_server_errors` field. The warning requires Claude Code v2.1.219 or later.
+
+#### Track plugin installs
+
+When [`CLAUDE_CODE_SYNC_PLUGIN_INSTALL`](/docs/en/env-vars) is set, Claude Code emits `system/plugin_install` events while marketplace plugins install before the first turn. Use these to surface install progress in your own UI.
+
+| Field | Type | Description |
+| - | - | - |
+| `type` | `"system"` | message type |
+| `subtype` | `"plugin_install"` | identifies this as a plugin install event |
+| `status` | `"started"`, `"installed"`, `"failed"`, or `"completed"` | `started` and `completed` bracket the overall install; `installed` and `failed` report individual marketplaces |
+| `name` | string, optional | marketplace name, present on `installed` and `failed` |
+| `error` | string, optional | failure message, present on `failed` |
+| `uuid` | string | unique event identifier |
+| `session_id` | string | session the event belongs to |
+
+### Auto-approve tools
+
+Use `--allowedTools` to let Claude use certain tools without prompting. Listing `Read` and `Edit` lets Claude read and edit files without asking for permission, apart from reads from [network paths](/docs/en/permissions#network-paths). Listing `Bash` does the same for shell commands, except in a run that starts in [auto mode](/docs/en/permission-modes#how-auto-mode-evaluates-actions), where Claude Code drops a bare `Bash` entry as a broad allow rule and auto mode evaluates each command instead. This example runs a test suite and fixes failures with those three tools listed:
+
+```bash theme={null}
+claude -p "Run the test suite and fix any failures" \
+  --allowedTools "Bash,Read,Edit"
+```
+
+To set a baseline for the whole session instead of listing individual tools, pass a [permission mode](/docs/en/permission-modes). A run where nothing sets a permission mode takes the [built-in starting permission mode](/docs/en/permission-modes#which-mode-a-session-starts-in), which can be `auto`, so pass the one you want:
+
+* **`auto`**: pass `--permission-mode auto` to have a classifier review most actions instead of you
+* **`dontAsk`**: Claude Code denies every call that would otherwise prompt, which is useful for locked-down CI runs. Actions that need no approval in Manual mode still run, such as file reads in your working directories and the [read-only command set](/docs/en/permissions#read-only-commands), and so do actions your `--allowedTools` entries or `permissions.allow` rules cover. `AskUserQuestion`, connector tools [your organization set to `ask`](/docs/en/mcp#organization-controls-on-connector-tools), MCP tools marked [`requiresUserInteraction`](/docs/en/mcp#require-approval-for-a-specific-tool), and [reads from network paths](/docs/en/permissions#network-paths) are denied even when an allow rule matches
+* **`acceptEdits`**: Claude writes files without prompting, and Claude Code auto-approves common filesystem commands such as `mkdir`, `touch`, `mv`, and `cp`. The [actions no mode auto-approves](/docs/en/permission-modes#actions-no-mode-auto-approves) still apply. Apart from the read-only command set, other shell commands and network requests still need an `--allowedTools` entry or a `permissions.allow` rule. See [what `acceptEdits` auto-approves](/docs/en/permission-modes#auto-approve-file-edits-with-acceptedits-mode) for the full list
+
+This example applies lint fixes with `acceptEdits` as the baseline:
+
+```bash theme={null}
+claude -p "Apply the lint fixes" --permission-mode acceptEdits
+```
+
+### Turn off permission prompts in unattended runs
+
+Pass `--permission-prompts none` when nobody is available to answer permission prompts, for example in a scheduled job. The flag matters most when your run has a permission host: an Agent SDK app with a [`canUseTool` callback](/docs/en/agent-sdk/user-input), or an MCP tool you pass with [`--permission-prompt-tool`](/docs/en/cli-reference#cli-flags). Without the flag, your run waits for that host to answer each permission request.
+
+With the flag, your run doesn't consult the host or wait on it. Anything that would prompt is denied unless a `PermissionRequest` hook allows it, Claude is told that nobody can approve the request and not to retry it, and the run continues. In a `-p` run with no host, these requests are denied either way, and the flag also tells Claude not to retry them. Permission rules, [`PermissionRequest` hooks](/docs/en/hooks#permissionrequest), and the permission mode you set still decide every call first; Claude Code denies only the requests that nothing else resolves.
+
+This example runs an unattended task in [auto mode](/docs/en/permission-modes#eliminate-prompts-with-auto-mode). The classifier reviews each action as usual, and Claude Code denies anything that would have fallen back to a prompt:
+
+```bash theme={null}
+claude -p "Update the dependency pins and run the tests" --permission-mode auto --permission-prompts none
+```
+
+With `--permission-prompts none`, Claude Code removes the tools that need an answer from a person, such as [`AskUserQuestion`](/docs/en/tools-reference#askuserquestion-tool-behavior), so Claude can't call them. Any [MCP elicitation request](/docs/en/mcp#respond-to-mcp-elicitation-requests) that no [`Elicitation` hook](/docs/en/hooks#elicitation) answers is cancelled.
+
+With `--output-format stream-json`, denials appear as `permission_denied` system messages, and the final result message lists them in `permission_denials`.
+
+<Note>
+  The `--permission-prompts` flag requires Claude Code v2.1.259 or later. Earlier versions reject it with an unknown-option error.
+</Note>
+
+### Create a commit
+
+This example reviews staged changes and creates a commit with an appropriate message:
+
+```bash theme={null}
+claude -p "Look at my staged changes and create an appropriate commit" \
+  --allowedTools "Bash(git diff *),Bash(git log *),Bash(git status *),Bash(git commit *)"
+```
+
+The `--allowedTools` flag uses [permission rule syntax](/docs/en/settings-reference#permission-rule-syntax). The trailing ` *` enables prefix matching, so `Bash(git diff *)` allows any command starting with `git diff`. The space before `*` is important: without it, `Bash(git diff*)` would also match `git diff-index`.
+
+<Note>
+  Command support differs in `-p` mode:
+
+  * User-invoked [skills](/docs/en/skills) and custom commands work. Include `/skill-name` in the prompt string and Claude Code expands it before running.
+  * Built-in commands that only run in the terminal interface, such as `/login`, aren't available.
+  * `/model`, `/effort`, `/fast`, `/color`, and `/rename` accept the value as an argument, for example `/model sonnet`, and `/mcp` with no argument prints a text summary of server status. These forms require Claude Code v2.1.205 or later and follow each command's [availability notes](/docs/en/commands#all-commands).
+  * To change a setting, pass `key=value` to `/config`, for example `/config thinking=false`.
+  * `/output-style <style>` switches [output styles](/docs/en/output-styles) and `/output-style` alone lists them. Requires Claude Code v2.1.269 or later.
+</Note>
+
+### Customize the system prompt
+
+Use `--append-system-prompt` to add instructions while keeping Claude Code's default behavior. This example pipes a PR diff to Claude and instructs it to review for security vulnerabilities. Save it as a shell script, for example `review.sh`:
+
+```bash theme={null}
+gh pr diff "$1" | claude -p \
+  --append-system-prompt "You are a security engineer. Review for vulnerabilities." \
+  --output-format json
+```
+
+In the script, `"$1"` stands for the first argument you pass on the command line. Run `bash review.sh 123` and the shell replaces `"$1"` with `123`, so the script fetches the diff for PR 123. Claude Code prints the review as JSON, with the text in the `result` field.
+
+See [system prompt flags](/docs/en/cli-reference#system-prompt-flags) for more options including `--system-prompt` to fully replace the default prompt.
+
+### Continue conversations
+
+Use `--continue` to continue the most recent conversation, or `--resume` with a session ID to continue a specific conversation. On Claude Code v2.1.257 or later, when you pass `--continue`, Claude Code opens a [background session](/docs/en/sessions#where-the-session-picker-looks) that has finished, but not one that is still running. This example runs a review, then sends follow-up prompts:
+
+```bash theme={null}
+# First request
+claude -p "Review this codebase for performance issues"
+
+# Continue the most recent conversation
+claude -p "Now focus on the database queries" --continue
+claude -p "Generate a summary of all issues found" --continue
+```
+
+If you're running multiple conversations, capture the session ID to resume a specific one:
+
+```bash theme={null}
+session_id=$(claude -p "Start a review" --output-format json | jq -r '.session_id')
+claude -p "Continue that review" --resume "$session_id"
+```
+
+You can run the two commands from different directories: Claude Code [finds the session by its ID](/docs/en/sessions#where-the-session-picker-looks) in any project on this machine.
+
+In place of the session ID, you can pass `--resume` the absolute path to a session's `.jsonl` [transcript file](/docs/en/sessions#where-transcripts-are-stored), and Claude Code continues the conversation stored in that file.
+
+## Next steps
+
+* [Agent SDK quickstart](/docs/en/agent-sdk/quickstart): build your first agent with Python or TypeScript
+* [CLI reference](/docs/en/cli-reference): all CLI flags and options
+* [GitHub Actions](/docs/en/github-actions): use the Agent SDK in GitHub workflows
+* [GitLab CI/CD](/docs/en/gitlab-ci-cd): use the Agent SDK in GitLab pipelines
+

@@ -102,4 +102,22 @@ describe('settings module', () => {
     await Promise.all(tasks.map((t) => t()))
     expect(existsSync(join(testHome, 'settings.json'))).toBe(true)
   })
+
+  it('recognizes reasoning and effort without warning (B1 fix)', () => {
+    const settingsPath = join(testHome, 'settings.json')
+    writeFileSync(settingsPath, JSON.stringify({ reasoning: 'high', effort: 'medium' }), 'utf-8')
+    const warnings: string[] = []
+    const loaded = loadSettings({ warn: (w) => warnings.push(w) })
+    expect(loaded.reasoning).toBe('high')
+    expect(warnings.length).toBe(0)
+  })
+
+  it('routes warnings through custom warn callback when present', () => {
+    const settingsPath = join(testHome, 'settings.json')
+    writeFileSync(settingsPath, JSON.stringify({ invalidRandomKey: 123 }), 'utf-8')
+    const warnings: string[] = []
+    loadSettings({ warn: (w) => warnings.push(w) })
+    expect(warnings.length).toBe(1)
+    expect(warnings[0]).toContain('invalidRandomKey')
+  })
 })

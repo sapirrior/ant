@@ -63,6 +63,11 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (checkpoint_id, path)
   );
   `,
+  // Migration 2: Track last run status and exit code
+  `
+  ALTER TABLE threads ADD COLUMN last_status TEXT;
+  ALTER TABLE threads ADD COLUMN last_exit_code INTEGER;
+  `,
 ]
 
 export function pidAlive(pid: number): boolean {

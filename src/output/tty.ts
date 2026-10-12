@@ -8,6 +8,16 @@ export interface ConfirmPromptOptions {
   colorLevel?: ColorLevel
 }
 
+export function hasControllingTTY(): boolean {
+  try {
+    const fd = openSync('/dev/tty', 'r+')
+    closeSync(fd)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function promptConfirmTTY(options: ConfirmPromptOptions): boolean {
   let fd: number | null = null
   try {

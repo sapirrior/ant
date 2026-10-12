@@ -1,6 +1,6 @@
 import type { ModelMessage } from 'ai'
 
-export type OutputFormat = 'text' | 'md' | 'json'
+export type OutputFormat = 'text' | 'md' | 'json' | 'stream-json'
 
 export type LogLevel = 'error' | 'info' | 'debug'
 
@@ -42,6 +42,8 @@ export interface Config {
   readonly cwd: string
   readonly continueLatest: boolean
   readonly resumeThreadId?: string
+  readonly streamRetries?: number
+  readonly settings?: import('../settings.ts').Settings
 }
 
 export type Status =
@@ -55,7 +57,7 @@ export type Status =
   | 'internal_error'
   | 'cancelled'
 
-export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 130 | 143
+export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 129 | 130 | 141 | 143
 
 export interface UsageSummary {
   readonly inputTokens?: number
@@ -119,7 +121,6 @@ export type ToolName =
   | 'TaskManager'
   | 'WebSearch'
   | 'WebFetch'
-  | 'AskUser'
 
 export interface ToolExecutionContext {
   readonly cwd: string

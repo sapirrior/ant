@@ -44,9 +44,52 @@ describe('database store', () => {
       expect(foreignKeys.foreign_keys).toBe(1)
 
       const userVersion = db.query('PRAGMA user_version;').get() as { user_version: number }
-      expect(userVersion.user_version).toBe(1)
+      expect(userVersion.user_version).toBe(2)
     } finally {
       db.close()
+    }
+  })
+
+  it('upgrades existing v1 database to v2 migration cleanly', () => {
+    const dbPath = join(tempDir, 'v1.db')
+    const rawDb = new Database(dbPath)
+    // Run migration 1 manually
+    rawDb.exec(`
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        cwd TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        turns INTEGER NOT NULL DEFAULT 0,
+        messages INTEGER NOT NULL DEFAULT 0,
+        steps INTEGER NOT NULL DEFAULT 0,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        lock_pid INTEGER,
+        lock_at INTEGER
+      );
+      CREATE TABLE messages (thread_id TEXT, seq INTEGER, json TEXT, PRIMARY KEY (thread_id, seq));
+      CREATE TABLE blobs (hash TEXT PRIMARY KEY, size INTEGER NOT NULL, data BLOB NOT NULL);
+      CREATE TABLE checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT, seq INTEGER, created_at INTEGER, tool TEXT, tool_call_id TEXT);
+      CREATE TABLE checkpoint_files (checkpoint_id INTEGER, path TEXT, before_hash TEXT, after_hash TEXT, mode INTEGER);
+      PRAGMA user_version = 1;
+    `)
+    rawDb.close()
+
+    const upgraded = openDb(dbPath)
+    try {
+      const row = upgraded.query('PRAGMA user_version;').get() as { user_version: number }
+      expect(row.user_version).toBe(2)
+
+      // Verify columns last_status and last_exit_code exist
+      const threadInfo = upgraded.query("PRAGMA table_info('threads');").all() as { name: string }[]
+      const colNames = threadInfo.map((c) => c.name)
+      expect(colNames).toContain('last_status')
+      expect(colNames).toContain('last_exit_code')
+    } finally {
+      upgraded.close()
     }
   })
 
