@@ -1,139 +1,164 @@
 # ant
 
-A fast, daily-use, streaming, model-agnostic AI agent CLI for developers.
+A fast, daily-use, streaming, model-agnostic AI agent CLI for developers. Built on [Bun](https://bun.sh) with atomic SQLite storage, content-addressed CAS file checkpoints, allowlist Bash security policy, and background task management.
 
-`ant` runs directly in your terminal, executes tools safely with capability-based security, streams diagnostics to `stderr`, and writes clean final answers to `stdout` for seamless Unix piping.
+`ant` runs directly in your terminal, executes tools safely with capability-based security, streams diagnostics to `stderr`, and writes clean final answers to `stdout` for Unix piping.
 
 ---
 
 ## Highlights
 
-* **Model Agnostic:** Works with Anthropic (`anthropic/claude-3-7-sonnet-20250219`), Google (`google/gemini-2.5-flash`), OpenRouter (`openrouter/...`), and custom OpenAI-compatible endpoints (`custom/...`).
-* **Unix Pipe Friendly:** Streams real-time tool logs and token metrics to `stderr`. The final answer is emitted cleanly to `stdout` without ANSI clutter.
-* **Capability-Based Security:** Strict **default-deny** policy. Granular flags (`--allow-read`, `--allow-edit`, `--allow-bash`, `--allow-destructive-bash`) unlock capabilities explicitly.
-* **Non-Interactive Multi-Turn:** Resume conversations cleanly without complex TUIs via `--continue` or `--resume <thread_id>`.
-* **Predictable Tool Execution:** Parallel tool calls from the model are serialized sequentially through an internal execution queue, preventing race conditions.
-* **Human-in-the-Loop (`AskUser`):** Prompts for input on genuine ambiguity, and degrades gracefully in non-interactive CI/piped environments.
+* **Model Agnostic:** Works with Anthropic (`anthropic/...`), Google (`google/...`), OpenRouter (`openrouter/...`), and custom endpoints (`custom/...`). Preflight key validation checks credentials before creating threads.
+* **Storage & Threads (`ant threads`):** SQLite (`$ANT_HOME/ant.db`) in WAL mode with process-level leases (`lock_pid`). Multi-turn sessions persist AI SDK `ModelMessage[]` verbatim.
+* **Rewindable Checkpoints (`ant checkpoints`):** Every file modification (`WriteFile`, `EditFile`, `DeleteFile`) records a SHA-256 content-addressed snapshot. Rewind cleanly with `ant checkpoints restore <n>`.
+* **Safe Bash Policy & TaskManager:** AST/token allowlist classifier (`safe`, `ask`, `blocked`). Slow foreground commands automatically hand off to background tasks (`TaskManager`) with streaming output cursors.
+* **Web Tools (`WebSearch` & `WebFetch`):** Production-grade DuckDuckGo HTML scraping and readable HTML-to-markdown chunked fetching.
+* **Reasoning Control:** Configure thinking effort via `--effort <level>` or `ant config set effort <level>`.
+* **Unix Pipe Friendly:** Streams real-time tool logs to `stderr`. Final answers emit cleanly to `stdout` without ANSI clutter.
 
 ---
 
 ## Installation
 
 ### Prerequisites
-* [Node.js](https://nodejs.org) >= 22 or [Bun](https://bun.com) >= 1.2
+* [Bun](https://bun.sh) >= 1.2
+* Linux or macOS
 
-### Setup
 ```bash
-# Clone the repository
 git clone https://github.com/your-username/ant.git
 cd ant
 
-# Install dependencies
+# Install dependencies (use npm, not bun install on Android/Termux environments)
 npm install
 
-# Build standalone binary (optional)
+# Run typecheck and tests
+bun run typecheck
+bun test
+
+# Build compiled binary
 bun run build
 ```
 
 ---
 
-## Quickstart
+## Configuration & Precedence
 
-### 1. Set Your Provider API Key
-Set your provider key in your shell environment:
+Settings precedence:
+1. **CLI flags** (`--model`, `--timeout`, `--effort`, etc.)
+2. **Environment variables** (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `ANT_HOME`)
+3. **Persisted settings** (`$ANT_HOME/settings.json`, default `~/.ant/settings.json`)
 
-```bash
-# Anthropic
-export ANTHROPIC_API_KEY="your-anthropic-key"
-
-# Or Google Gemini
-export GEMINI_API_KEY="your-gemini-key"
-
-# Or OpenRouter
-export OPENROUTER_API_KEY="your-openrouter-key"
-```
-
-### 2. Configure Default Model
-Persist your preferred default model in `~/.ant/settings.json`:
+### Settings CLI (`ant config`)
 
 ```bash
+# View path to settings.json
+ant config path
+
+# View all settings
+ant config get
+
+# Set persistent default model and reasoning effort
 ant config set model google/gemini-2.5-flash
+ant config set effort medium
+
+# Set permissions and timeouts
+ant config set allow.read true
+ant config set timeout 10m
+
+# Remove a setting
+ant config unset timeout
 ```
 
-### 3. Run Instructions
+---
+
+## Usage & Commands
+
+### 1. Run Instructions
 ```bash
 # Ask a direct question
 ant "Explain the difference between interface and type in TypeScript"
 
-# Inspect files in the current workspace
-ant "Find all failing tests in this project" --allow-read
+# Inspect files in workspace
+ant --allow-read "Find all failing tests in this project"
 
-# Make targeted file edits
-ant "Fix the typo in src/main.ts" --allow-edit
+# Make surgical file edits
+ant --allow-edit "Fix the typo in src/main.ts"
 
 # Run shell commands
-ant "Run tests and summarize failures" --allow-read --allow-bash
+ant --allow-bash "Run tests and summarize failures"
+
+# Search web and fetch reference documentation
+ant "Find the latest release notes for Bun and summarize them"
 ```
 
----
-
-## Workflows
-
-### Piping Input
-Pipe terminal output directly into `ant`:
-
-```bash
-git diff | ant "Write a conventional git commit message for these changes"
-cat build.log | ant "Explain why this build failed"
-```
-
-### Multi-Turn Conversations
-Continue from your last session without leaving the command line:
-
+### 2. Multi-Turn Sessions & Resuming
 ```bash
 # Turn 1
-ant "Inspect package.json and list our direct dependencies" --allow-read
+ant --allow-read "Inspect package.json and list our direct dependencies"
 
-# Turn 2: Picks up context from the previous turn
+# Turn 2: Continues previous thread in the current working directory
 ant --continue "Which of these are outdated?"
+
+# Manage threads
+ant threads list
+ant threads show <id> --messages
+ant threads rename <id> "New thread title"
+ant threads delete <id> -y
 ```
 
-### JSON Output for Automation
+### 3. Checkpoints & Rewind
 ```bash
-ant "Count all export statements in src/main.ts" --allow-read --output json
+# Inspect checkpoints created by tool edits
+ant checkpoints list
+
+# Dry-run rewinding to before checkpoint #2
+ant checkpoints restore 2 --dry-run
+
+# Restore files to state before checkpoint #2
+ant checkpoints restore 2
 ```
 
 ---
 
-## CLI Reference
+## CLI Options
 
-### Commands
-```text
-ant [options] [prompt]    Run an instruction prompt (default action)
-ant config                View current settings in ~/.ant/settings.json
-ant config get <key>      Get a specific configuration value
-ant config set <key> <val>Set a persistent configuration value
-```
-
-### Options
 | Flag | Description |
 |---|---|
-| `-p, --prompt <text>` | Instruction prompt for the agent |
-| `--model <provider/id>` | Model identifier (`provider/model-id`) |
-| `--allow-read` | Allow reading files and directory listing (`fs.read`) |
-| `--allow-edit` | Allow editing, writing, and deleting files (`fs.write`) |
-| `--allow-bash` | Allow running safe shell commands (`shell.run`) |
-| `--allow-destructive-bash` | Allow destructive shell commands (`shell.destructive`) |
-| `--max-steps <num>` | Maximum tool execution loop iterations (default: `30`) |
-| `--timeout <duration>` | Wall-clock execution timeout e.g. `30m`, `10s` (default: `30m`) |
-| `--output <format>` | Output format: `text`, `md`, or `json` (default: `text`) |
-| `--log-level <level>` | Log level: `error`, `info`, `debug` (default: `info`) |
-| `--continue` | Continue the latest conversation thread |
-| `--resume <thread_id>` | Resume a specific conversation thread by ID |
-| `-h, --help` | Show help and options |
-| `-V, --version` | Show version |
+| `-p, --prompt <text>` | User prompt or instruction |
+| `-m, --model <id>` | Language model (`provider/model-id`) |
+| `--effort <level>` | Reasoning effort (`none`, `low`, `medium`, `high`, etc.) |
+| `-c, --continue` | Continue the latest thread in current directory |
+| `-r, --resume <id>` | Resume a specific thread by ID or prefix |
+| `--allow-read` | Grant `fs.read` capability |
+| `--allow-edit` | Grant `fs.read` and `fs.write` capabilities |
+| `--allow-bash` | Grant `shell.run` capability |
+| `--allow-destructive-bash` | Grant `shell.destructive` capability (skips prompts) |
+| `--timeout <dur>` | Hard execution timeout (e.g. `30s`, `10m`) |
+| `--output <format>` | Output format (`text`, `md`, `json`) |
+| `--log-level <level>` | Verbosity (`error`, `info`, `debug`) |
+| `--theme <theme>` | Terminal theme (`auto`, `dark`, `light`, `ansi`) |
 
 ---
 
-## License
-MIT
+## Exit Codes
+
+| Code | Status | Meaning |
+|---|---|---|
+| `0` | `completed` | Run finished successfully |
+| `1` | `max_steps` / `truncated` / `empty_response` | Model hit step cap, length cap, or empty output |
+| `2` | `usage_error` | Invalid arguments or configuration error |
+| `3` | `model_error` | Provider API error after retries |
+| `4` | `timeout` | Wall-clock execution timeout reached |
+| `5` | `internal_error` | Unexpected application failure |
+| `130` | `cancelled` | Interrupted by user signal (SIGINT / Ctrl-C) |
+| `143` | `cancelled` | Terminated by system signal (SIGTERM) |
+
+---
+
+## Security Model & Known Limits
+
+1. **Bash is not a sandbox:** The bash classifier checks command tokens against an allowlist and prompts for mutating operations. Prompt injections can still run unintended allowed commands. Do not run `ant` with `--allow-bash` on untrusted repositories.
+2. **Checkpoints track file tools only:** Checkpoints capture `WriteFile`, `EditFile`, and `DeleteFile`. Modifications caused by Bash commands or external git tools are not recorded; `restore` detects external changes as conflicts and refuses to overwrite them without `--force`.
+3. **Background tasks lifetime:** Background processes started via `TaskManager` run as child processes and terminate when `ant` exits. They do not run as persistent daemons.
+4. **Secrets at rest:** File tools deny sensitive files (`.env`, `*.pem`, `id_rsa`, `.ssh/*`). However, tool execution outputs are persisted in `$ANT_HOME/ant.db` (file mode `0600`).
+5. **Operating Systems:** Supported on Linux and macOS (`/dev/tty`, POSIX process groups). Windows is not supported.

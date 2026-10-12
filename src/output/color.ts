@@ -1,4 +1,5 @@
 export type ColorLevel = 0 | 1 | 2 | 3
+export type ThemeMode = 'auto' | 'dark' | 'light' | 'ansi'
 
 export interface ThemeColors {
   primary: [number, number, number]
@@ -14,29 +15,43 @@ export interface ThemeColors {
 }
 
 export const DARK_THEME: ThemeColors = {
-  primary: [215, 119, 87],
-  secondary: [177, 185, 249],
-  accent: [175, 135, 255],
-  success: [78, 186, 101],
-  error: [255, 107, 128],
-  warning: [255, 193, 7],
-  info: [72, 150, 140],
-  muted: [153, 153, 153],
-  border: [136, 136, 136],
+  primary: [0xfa, 0xb2, 0x83],   // #fab283
+  secondary: [0x5c, 0x9c, 0xf5], // #5c9cf5
+  accent: [0x9d, 0x7c, 0xd8],    // #9d7cd8
+  error: [0xe0, 0x6c, 0x75],     // #e06c75
+  warning: [0xf5, 0xa7, 0x42],   // #f5a742
+  success: [0x7f, 0xd8, 0x8f],   // #7fd88f
+  info: [0x56, 0xb6, 0xc2],      // #56b6c2
+  muted: [0x80, 0x80, 0x80],     // #808080
+  border: [0x55, 0x55, 0x55],
   text: null,
 }
 
+export const LIGHT_THEME: ThemeColors = {
+  primary: [0x3b, 0x7d, 0xd8],   // #3b7dd8
+  secondary: [0x7b, 0x5b, 0xb6], // #7b5bb6
+  accent: [0xd6, 0x8c, 0x27],    // #d68c27
+  error: [0xd1, 0x38, 0x3d],     // #d1383d
+  warning: [0xd6, 0x8c, 0x27],   // #d68c27
+  success: [0x3d, 0x9a, 0x57],   // #3d9a57
+  info: [0x31, 0x87, 0x95],      // #318795
+  muted: [0x8a, 0x8a, 0x8a],     // #8a8a8a
+  border: [0xcc, 0xcc, 0xcc],
+  text: null,
+}
+
+// 16-color table explicitly specified in Plan §10.2
 export const ANSI_16_MAP: Record<keyof ThemeColors, number> = {
-  primary: 91,
-  secondary: 94,
-  accent: 95,
-  success: 92,
-  error: 91,
-  warning: 93,
-  info: 96,
-  muted: 90,
+  primary: 33,   // yellow
+  secondary: 94, // bright blue
+  accent: 35,    // magenta
+  error: 31,     // red
+  warning: 93,   // bright yellow
+  success: 32,   // green
+  info: 36,      // cyan
+  muted: 90,     // bright black
   border: 37,
-  text: 39,
+  text: 39,      // default
 }
 
 export function detectColorLevel(
@@ -65,6 +80,25 @@ export function detectColorLevel(
   return 0
 }
 
+export function resolveTheme(
+  themeSetting: ThemeMode = 'auto',
+  env: NodeJS.ProcessEnv = process.env
+): ThemeColors {
+  if (themeSetting === 'light') return LIGHT_THEME
+  if (themeSetting === 'dark') return DARK_THEME
+
+  if (themeSetting === 'auto') {
+    const fgbg = env.COLORFGBG
+    if (fgbg) {
+      const parts = fgbg.split(';')
+      const bg = parts[parts.length - 1] ? Number.parseInt(parts[parts.length - 1]!, 10) : 0
+      if (bg >= 7) return LIGHT_THEME
+    }
+  }
+
+  return DARK_THEME
+}
+
 export function rgbToAnsi256(r: number, g: number, b: number): number {
   if (r === g && g === b) {
     if (r < 8) return 16
@@ -81,12 +115,15 @@ export function rgbToAnsi256(r: number, g: number, b: number): number {
 
 export function createColorFormatter(
   level: ColorLevel = detectColorLevel(),
-  theme: ThemeColors = DARK_THEME
+  themeMode: ThemeMode = 'auto'
 ) {
+  const isAnsiTheme = themeMode === 'ansi'
+  const theme = resolveTheme(themeMode)
+
   function colorize(role: keyof ThemeColors, text: string): string {
     if (level === 0 || !text) return text
 
-    if (level === 1) {
+    if (level === 1 || isAnsiTheme) {
       const code = ANSI_16_MAP[role]
       return `\x1b[${code}m${text}\x1b[0m`
     }
@@ -164,12 +201,14 @@ export function getSymbols(unicode: boolean = detectUnicodeSupported()): Termina
 
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m = Math.floor(s / 60)
+  const remSec = (s % 60).toFixed(0)
+  return `${m}m ${remSec}s`
 }
 
-export function formatTokens(count?: number): string {
-  if (count === undefined) return '0'
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
-  if (count >= 1000) return `${(count / 1000).toFixed(1)}k`
-  return String(count)
+export function formatTokens(n: number): string {
+  if (n < 1000) return `${n}`
+  return `${(n / 1000).toFixed(1)}k`
 }
