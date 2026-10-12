@@ -1,0 +1,105 @@
+import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  loadSettings,
+  saveSettings,
+  parseDurationMs,
+  KEYS,
+  withFileLock,
+  getSettingsLockPath,
+  type Settings,
+} from './settings.ts'
+
+describe('settings module', () => {
+  let testHome: string
+  const originalAntHome = process.env.ANT_HOME
+
+  beforeEach(() => {
+    testHome = mkdtempSync(join(tmpdir(), 'ant-settings-test-'))
+    process.env.ANT_HOME = testHome
+  })
+
+  afterEach(() => {
+    process.env.ANT_HOME = originalAntHome
+    rmSync(testHome, { recursive: true, force: true })
+  })
+
+  it('parses duration strings correctly', () => {
+    expect(parseDurationMs('100')).toBe(100)
+    expect(parseDurationMs('500ms')).toBe(500)
+    expect(parseDurationMs('10s')).toBe(10000)
+    expect(parseDurationMs('2.5s')).toBe(2500)
+    expect(parseDurationMs('5m')).toBe(300000)
+    expect(parseDurationMs('1h')).toBe(3600000)
+    expect(() => parseDurationMs('invalid')).toThrow(/Invalid duration format/)
+  })
+
+  it('returns empty object when settings.json does not exist', () => {
+    expect(loadSettings()).toEqual({})
+  })
+
+  it('saves and loads settings round-trip', () => {
+    const s: Settings = {
+      model: 'google/gemini-2.5-flash',
+      maxSteps: 25,
+      timeout: '15m',
+      allow: { read: true, edit: false },
+    }
+    saveSettings(s)
+    const loaded = loadSettings()
+    expect(loaded.model).toBe('google/gemini-2.5-flash')
+    expect(loaded.maxSteps).toBe(25)
+    expect(loaded.timeout).toBe('15m')
+    expect(loaded.allow?.read).toBe(true)
+  })
+
+  it('fails with clear error on malformed JSON', () => {
+    const settingsPath = join(testHome, 'settings.json')
+    writeFileSync(settingsPath, '{ invalid json', 'utf-8')
+    expect(() => loadSettings()).toThrow(/malformed JSON/)
+  })
+
+  it('warns on unknown keys and ignores them', () => {
+    const settingsPath = join(testHome, 'settings.json')
+    writeFileSync(settingsPath, JSON.stringify({ unknownKey: 'value', maxSteps: 10 }), 'utf-8')
+    const loaded = loadSettings()
+    expect(loaded.maxSteps).toBe(10)
+  })
+
+  it('strictly validates and parses settings keys in KEYS table', () => {
+    expect(KEYS['maxSteps']!.parse('15')).toBe(15)
+    expect(() => KEYS['maxSteps']!.parse('-5')).toThrow(/positive integer/)
+    expect(() => KEYS['maxSteps']!.parse('abc')).toThrow(/positive integer/)
+
+    expect(KEYS['output']!.parse('text')).toBe('text')
+    expect(KEYS['output']!.parse('md')).toBe('md')
+    expect(KEYS['output']!.parse('json')).toBe('json')
+    expect(() => KEYS['output']!.parse('yaml')).toThrow(/must be "text", "md", or "json"/)
+
+    expect(KEYS['reasoning']!.parse('low')).toBe('low')
+    expect(KEYS['reasoning']!.parse('max')).toBe('max')
+    expect(KEYS['reasoning']!.parse('default')).toBe('provider-default')
+    expect(KEYS['effort']!.parse('minimal')).toBe('minimal')
+    expect(() => KEYS['reasoning']!.parse('super-high')).toThrow(/must be one of/)
+
+    expect(KEYS['allow.read']!.parse('true')).toBe(true)
+    expect(KEYS['allow.read']!.parse('false')).toBe(false)
+    expect(() => KEYS['allow.read']!.parse('yes')).toThrow(/must be true or false/)
+  })
+
+  it('survives concurrent writes with withFileLock', async () => {
+    const lockPath = getSettingsLockPath()
+    const tasks = Array.from({ length: 5 }, (_, i) => async () => {
+      await withFileLock(lockPath, async () => {
+        const current = loadSettings()
+        KEYS[`tools.Bash.passEnv`]!.set(current, [`VAR_${i}`])
+        saveSettings(current)
+      })
+    })
+
+    await Promise.all(tasks.map((t) => t()))
+    expect(existsSync(join(testHome, 'settings.json'))).toBe(true)
+  })
+})

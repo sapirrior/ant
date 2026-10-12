@@ -1,12 +1,12 @@
 import { Command } from 'commander'
-import type { LogLevel, OutputFormat } from '../core/types.ts'
 import {
   getSettingsPath,
+  getSettingsLockPath,
   loadSettings,
-  parseDurationMs,
   saveSettings,
-  validateModelString,
-  type UserSettings,
+  withFileLock,
+  KEYS,
+  type Settings,
 } from '../settings.ts'
 
 export function registerConfigCommand(program: Command): void {
@@ -21,13 +21,30 @@ export function registerConfigCommand(program: Command): void {
     })
 
   configCmd
+    .command('path')
+    .description('Print the path to settings.json')
+    .action(() => {
+      process.stdout.write(`${getSettingsPath()}\n`)
+      process.exitCode = 0
+    })
+
+  configCmd
     .command('get <key>')
     .description('Get the value of a setting from ~/.ant/settings.json')
     .action((key: string) => {
+      const keyDef = KEYS[key]
+      if (!keyDef) {
+        process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
+        process.exitCode = 2
+        return
+      }
+
       const current = loadSettings()
-      const val = (current as Record<string, unknown>)[key]
+      const val = keyDef.get(current)
       if (val === undefined) {
-        process.stderr.write(`[ant] Key "${key}" is not set.\n`)
+        process.stderr.write(`[ant] Setting "${key}" is not set.\n`)
+      } else if (typeof val === 'object' && val !== null) {
+        process.stdout.write(`${JSON.stringify(val, null, 2)}\n`)
       } else {
         process.stdout.write(`${val}\n`)
       }
@@ -37,60 +54,64 @@ export function registerConfigCommand(program: Command): void {
   configCmd
     .command('set <key> <value>')
     .description('Set a setting in ~/.ant/settings.json')
-    .action((key: string, value: string) => {
-      const current = loadSettings()
-      const settingsPath = getSettingsPath()
-      const updated: Record<string, unknown> = { ...current }
-
-      switch (key) {
-        case 'model':
-          validateModelString(value)
-          updated.model = value
-          break
-        case 'maxSteps': {
-          const num = Number.parseInt(value, 10)
-          if (Number.isNaN(num) || num <= 0) {
-            process.stderr.write('[ant] error: maxSteps must be a positive integer.\n')
-            process.exitCode = 2
-            return
-          }
-          updated.maxSteps = num
-          break
-        }
-        case 'timeout':
-          parseDurationMs(value)
-          updated.timeout = value
-          break
-        case 'outputFormat':
-          if (value !== 'text' && value !== 'md' && value !== 'json') {
-            process.stderr.write('[ant] error: outputFormat must be text, md, or json.\n')
-            process.exitCode = 2
-            return
-          }
-          updated.outputFormat = value as OutputFormat
-          break
-        case 'logLevel':
-          if (value !== 'error' && value !== 'info' && value !== 'debug') {
-            process.stderr.write('[ant] error: logLevel must be error, info, or debug.\n')
-            process.exitCode = 2
-            return
-          }
-          updated.logLevel = value as LogLevel
-          break
-        case 'allowRead':
-        case 'allowEdit':
-        case 'allowBash':
-        case 'allowDestructiveBash':
-          updated[key] = value === 'true' || value === '1'
-          break
-        default:
-          process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
-          process.exitCode = 2
-          return
+    .action(async (key: string, value: string) => {
+      const keyDef = KEYS[key]
+      if (!keyDef) {
+        process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
+        process.exitCode = 2
+        return
       }
 
-      saveSettings(updated as UserSettings)
-      process.stdout.write(`Updated ${key} = ${value} in ${settingsPath}\n`)
-      process.exitCode = 0
+      let parsedVal: unknown
+      try {
+        parsedVal = keyDef.parse(value)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        process.stderr.write(`[ant] error: ${msg}\n`)
+        process.exitCode = 2
+        return
+      }
+
+      const lockPath = getSettingsLockPath()
+      try {
+        await withFileLock(lockPath, () => {
+          const current: Settings = loadSettings()
+          keyDef.set(current, parsedVal)
+          saveSettings(current)
+        })
+        process.stdout.write(`Updated ${key} = ${value} in ${getSettingsPath()}\n`)
+        process.exitCode = 0
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        process.stderr.write(`[ant] error: Failed to update settings: ${msg}\n`)
+        process.exitCode = 2
+      }
+    })
+
+  configCmd
+    .command('unset <key>')
+    .description('Unset a setting in ~/.ant/settings.json')
+    .action(async (key: string) => {
+      const keyDef = KEYS[key]
+      if (!keyDef) {
+        process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
+        process.exitCode = 2
+        return
+      }
+
+      const lockPath = getSettingsLockPath()
+      try {
+        await withFileLock(lockPath, () => {
+          const current: Settings = loadSettings()
+          keyDef.unset(current)
+          saveSettings(current)
+        })
+        process.stdout.write(`Unset ${key} in ${getSettingsPath()}\n`)
+        process.exitCode = 0
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        process.stderr.write(`[ant] error: Failed to unset setting: ${msg}\n`)
+        process.exitCode = 2
+      }
     })
 }

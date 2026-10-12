@@ -4,6 +4,18 @@ export type OutputFormat = 'text' | 'md' | 'json'
 
 export type LogLevel = 'error' | 'info' | 'debug'
 
+export type Theme = 'auto' | 'dark' | 'light' | 'ansi'
+
+export type ReasoningEffort =
+  | 'provider-default'
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+
 export type Capability =
   | 'fs.read'
   | 'fs.write'
@@ -21,8 +33,11 @@ export interface Config {
   readonly model: string
   readonly maxSteps: number
   readonly timeoutMs: number
+  readonly retries: number
   readonly outputFormat: OutputFormat
   readonly logLevel: LogLevel
+  readonly theme: Theme
+  readonly effort?: ReasoningEffort
   readonly grants: Grants
   readonly cwd: string
   readonly continueLatest: boolean

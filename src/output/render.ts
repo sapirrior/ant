@@ -7,7 +7,6 @@ export interface RenderOptions {
   threadId?: string
   checkpoints?: number[]
   colorLevel?: ColorLevel
-  isTTY?: boolean
 }
 
 export function renderOutcome(
@@ -39,20 +38,18 @@ export function renderOutcome(
     )
   }
 
-  // Text mode
   if (outcome.status !== 'completed' && outcome.text.trim().length === 0) {
     return ''
   }
 
-  const isTTY = options.isTTY ?? Boolean(process.stdout.isTTY)
-  const colorLevel = options.colorLevel ?? detectColorLevel()
-
-  if (isTTY) {
+  // md format: formatted markdown with smart wrapping and syntax highlighting
+  if (options.format === 'md') {
+    const colorLevel = options.colorLevel ?? detectColorLevel()
     const formatted = renderMarkdown(outcome.text, { colorLevel })
     return formatted.endsWith('\n') ? formatted : `${formatted}\n`
   }
 
-  // Piped / redirected stdout: plain text
+  // text format: raw unformatted text
   return outcome.text.endsWith('\n') ? outcome.text : `${outcome.text}\n`
 }
 

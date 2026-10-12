@@ -1,18 +1,61 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, closeSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { LogLevel, OutputFormat } from './core/types.ts'
 
-export interface UserSettings {
-  readonly model?: string
-  readonly maxSteps?: number
-  readonly timeout?: string
-  readonly outputFormat?: OutputFormat
-  readonly logLevel?: LogLevel
-  readonly allowRead?: boolean
-  readonly allowEdit?: boolean
-  readonly allowBash?: boolean
-  readonly allowDestructiveBash?: boolean
+import type { ReasoningEffort } from './core/types.ts'
+
+export type { ReasoningEffort }
+
+export interface ToolSettings {
+  enabled?: boolean
+  foregroundMs?: number
+  passEnv?: string[]
+}
+
+export interface Settings {
+  model?: string
+  maxSteps?: number
+  timeout?: string
+  retries?: number
+  streamRetries?: number
+  output?: 'text' | 'md' | 'json'
+  reasoning?: ReasoningEffort
+  logLevel?: 'error' | 'info' | 'debug'
+  theme?: 'auto' | 'dark' | 'light' | 'ansi'
+  allow?: {
+    read?: boolean
+    edit?: boolean
+    bash?: boolean
+    destructiveBash?: boolean
+  }
+  tools?: Record<string, ToolSettings>
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  maxSteps: 30,
+  timeout: '30m',
+  retries: 4,
+  streamRetries: 1,
+  output: 'text',
+  logLevel: 'info',
+  theme: 'auto',
+  allow: {
+    read: false,
+    edit: false,
+    bash: false,
+    destructiveBash: false,
+  },
+  tools: {
+    ReadFile: { enabled: true },
+    ListDir: { enabled: true },
+    Grep: { enabled: true },
+    WriteFile: { enabled: true },
+    EditFile: { enabled: true },
+    DeleteFile: { enabled: true },
+    AskUser: { enabled: true },
+    Bash: { enabled: true, foregroundMs: 10000, passEnv: [] },
+    TaskManager: { enabled: true },
+  },
 }
 
 export function parseDurationMs(durationStr: string): number {
@@ -43,36 +86,413 @@ export function parseDurationMs(durationStr: string): number {
   }
 }
 
-export function validateModelString(model: string): void {
-  if (model.includes(':')) {
-    throw new Error(`Invalid model format: "${model}". Colons are not allowed. Use "provider/model-id" format (e.g. "anthropic/claude-3-7-sonnet-20250219").`)
-  }
-  const slashIdx = model.indexOf('/')
-  if (slashIdx <= 0 || slashIdx === model.length - 1) {
-    throw new Error(`Invalid model format: "${model}". Must follow "provider/model-id" format (e.g. "anthropic/claude-3-7-sonnet-20250219").`)
+export function getAntHome(): string {
+  return process.env.ANT_HOME ?? join(homedir(), '.ant')
+}
+
+export function getSettingsPath(): string {
+  return join(getAntHome(), 'settings.json')
+}
+
+export function getSettingsLockPath(): string {
+  return join(getAntHome(), 'settings.json.lock')
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EPERM') {
+      return true
+    }
+    return false
   }
 }
 
-export function getSettingsPath(customPath?: string): string {
-  return customPath ?? join(homedir(), '.ant', 'settings.json')
-}
+export async function withFileLock<T>(lockPath: string, fn: () => T | Promise<T>): Promise<T> {
+  const maxWaitMs = 5000
+  const retryIntervalMs = 50
+  const staleAgeMs = 30000
+  const startTime = Date.now()
+  mkdirSync(dirname(lockPath), { recursive: true })
 
-export function loadSettings(customPath?: string): UserSettings {
-  const settingsPath = getSettingsPath(customPath)
-  if (!existsSync(settingsPath)) {
-    return {}
+  while (true) {
+    try {
+      const fd = openSync(lockPath, 'wx')
+      writeFileSync(fd, `${process.pid}\n${Date.now()}`, 'utf-8')
+      closeSync(fd)
+      break
+    } catch (err: unknown) {
+      if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EEXIST') {
+        // Check if stale
+        try {
+          const content = readFileSync(lockPath, 'utf-8')
+          const [pidStr, lockTimeStr] = content.trim().split('\n')
+          const pid = pidStr ? Number.parseInt(pidStr, 10) : 0
+          const lockTime = lockTimeStr ? Number.parseInt(lockTimeStr, 10) : 0
+          const age = Date.now() - lockTime
+
+          if (age > staleAgeMs || (pid > 0 && !pidAlive(pid))) {
+            try {
+              unlinkSync(lockPath)
+              continue
+            } catch {
+              // ignore
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        if (Date.now() - startTime > maxWaitMs) {
+          throw new Error(`Timeout waiting for settings lock (${lockPath}) after ${maxWaitMs}ms`)
+        }
+        await new Promise((resolve) => setTimeout(resolve, retryIntervalMs))
+      } else {
+        throw err
+      }
+    }
   }
 
   try {
-    const raw = readFileSync(settingsPath, 'utf-8')
-    return JSON.parse(raw) as UserSettings
-  } catch (error) {
-    throw new Error(`Failed to read user settings at ${settingsPath}: ${error instanceof Error ? error.message : String(error)}`)
+    return await fn()
+  } finally {
+    try {
+      unlinkSync(lockPath)
+    } catch {
+      // ignore
+    }
   }
 }
 
-export function saveSettings(settings: UserSettings, customPath?: string): void {
-  const settingsPath = getSettingsPath(customPath)
-  mkdirSync(dirname(settingsPath), { recursive: true })
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
+const KNOWN_TOP_KEYS = new Set([
+  'model',
+  'maxSteps',
+  'timeout',
+  'retries',
+  'streamRetries',
+  'output',
+  'logLevel',
+  'theme',
+  'allow',
+  'tools',
+])
+
+export function loadSettings(): Settings {
+  const path = getSettingsPath()
+  if (!existsSync(path)) {
+    return {}
+  }
+
+  let raw: string
+  try {
+    raw = readFileSync(path, 'utf-8')
+  } catch (err) {
+    throw new Error(`Failed to read settings from ${path}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`Settings file at ${path} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Settings file at ${path} must contain a JSON object.`)
+  }
+
+  for (const k of Object.keys(parsed)) {
+    if (!KNOWN_TOP_KEYS.has(k)) {
+      process.stderr.write(`[ant] warning: ignoring unknown setting "${k}"\n`)
+    }
+  }
+
+  return parsed as Settings
+}
+
+export function saveSettings(settings: Settings): void {
+  const path = getSettingsPath()
+  const dir = dirname(path)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+
+  const tmpPath = `${path}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
+  writeFileSync(tmpPath, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 })
+  renameSync(tmpPath, path)
+}
+
+// Key parsing & management
+export interface KeyDefinition {
+  key: string
+  describe: string
+  parse(val: string): unknown
+  get(s: Settings): unknown
+  set(s: Settings, val: unknown): void
+  unset(s: Settings): void
+}
+
+function parseBool(val: string, keyName: string): boolean {
+  if (val === 'true') return true
+  if (val === 'false') return false
+  throw new Error(`Setting "${keyName}" must be true or false (got "${val}")`)
+}
+
+function parsePositiveInt(val: string, keyName: string): number {
+  const n = Number.parseInt(val, 10)
+  if (Number.isNaN(n) || n <= 0) {
+    throw new Error(`Setting "${keyName}" must be a positive integer (got "${val}")`)
+  }
+  return n
+}
+
+export const VALID_REASONING: readonly ReasoningEffort[] = [
+  'provider-default',
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]
+
+export function parseReasoning(val: string): ReasoningEffort {
+  const norm = val.trim().toLowerCase()
+  if (norm === 'default') return 'provider-default'
+  if (VALID_REASONING.includes(norm as ReasoningEffort)) {
+    return norm as ReasoningEffort
+  }
+  throw new Error(
+    `Setting "reasoning" must be one of: provider-default, default, none, minimal, low, medium, high, xhigh, max (got "${val}")`
+  )
+}
+
+export const KEYS: Record<string, KeyDefinition> = {
+  model: {
+    key: 'model',
+    describe: 'Model in provider/model-id format',
+    parse: (v) => {
+      if (!v.includes('/') || v.includes(':')) {
+        throw new Error(`Invalid model format: "${v}". Use "provider/model-id" format without colons.`)
+      }
+      return v.trim()
+    },
+    get: (s) => s.model,
+    set: (s, v) => { s.model = v as string },
+    unset: (s) => { delete s.model },
+  },
+  maxSteps: {
+    key: 'maxSteps',
+    describe: 'Maximum agent execution steps (positive integer)',
+    parse: (v) => parsePositiveInt(v, 'maxSteps'),
+    get: (s) => s.maxSteps,
+    set: (s, v) => { s.maxSteps = v as number },
+    unset: (s) => { delete s.maxSteps },
+  },
+  timeout: {
+    key: 'timeout',
+    describe: 'Wall-clock timeout e.g. "30m", "10s"',
+    parse: (v) => {
+      parseDurationMs(v)
+      return v.trim()
+    },
+    get: (s) => s.timeout,
+    set: (s, v) => { s.timeout = v as string },
+    unset: (s) => { delete s.timeout },
+  },
+  retries: {
+    key: 'retries',
+    describe: 'Number of API request retries (0-10)',
+    parse: (v) => {
+      const n = Number.parseInt(v, 10)
+      if (Number.isNaN(n) || n < 0 || n > 10) {
+        throw new Error(`Setting "retries" must be an integer between 0 and 10 (got "${v}")`)
+      }
+      return n
+    },
+    get: (s) => s.retries,
+    set: (s, v) => { s.retries = v as number },
+    unset: (s) => { delete s.retries },
+  },
+  streamRetries: {
+    key: 'streamRetries',
+    describe: 'Number of mid-stream step retries (positive integer or 0)',
+    parse: (v) => {
+      const n = Number.parseInt(v, 10)
+      if (Number.isNaN(n) || n < 0) {
+        throw new Error(`Setting "streamRetries" must be a non-negative integer (got "${v}")`)
+      }
+      return n
+    },
+    get: (s) => s.streamRetries,
+    set: (s, v) => { s.streamRetries = v as number },
+    unset: (s) => { delete s.streamRetries },
+  },
+  output: {
+    key: 'output',
+    describe: 'Output format: text | md | json',
+    parse: (v) => {
+      if (v !== 'text' && v !== 'md' && v !== 'json') {
+        throw new Error(`Setting "output" must be "text", "md", or "json" (got "${v}")`)
+      }
+      return v
+    },
+    get: (s) => s.output,
+    set: (s, v) => { s.output = v as 'text' | 'md' | 'json' },
+    unset: (s) => { delete s.output },
+  },
+  logLevel: {
+    key: 'logLevel',
+    describe: 'Logging verbosity: error | info | debug',
+    parse: (v) => {
+      if (v !== 'error' && v !== 'info' && v !== 'debug') {
+        throw new Error(`Setting "logLevel" must be "error", "info", or "debug" (got "${v}")`)
+      }
+      return v
+    },
+    get: (s) => s.logLevel,
+    set: (s, v) => { s.logLevel = v as 'error' | 'info' | 'debug' },
+    unset: (s) => { delete s.logLevel },
+  },
+  theme: {
+    key: 'theme',
+    describe: 'Color theme: auto | dark | light | ansi',
+    parse: (v) => {
+      if (v !== 'auto' && v !== 'dark' && v !== 'light' && v !== 'ansi') {
+        throw new Error(`Setting "theme" must be "auto", "dark", "light", or "ansi" (got "${v}")`)
+      }
+      return v
+    },
+    get: (s) => s.theme,
+    set: (s, v) => { s.theme = v as 'auto' | 'dark' | 'light' | 'ansi' },
+    unset: (s) => { delete s.theme },
+  },
+  reasoning: {
+    key: 'reasoning',
+    describe: 'Reasoning effort: provider-default | none | minimal | low | medium | high | xhigh | max',
+    parse: parseReasoning,
+    get: (s) => s.reasoning,
+    set: (s, v) => { s.reasoning = v as ReasoningEffort },
+    unset: (s) => { delete s.reasoning },
+  },
+  effort: {
+    key: 'effort',
+    describe: 'Alias for reasoning effort',
+    parse: parseReasoning,
+    get: (s) => s.reasoning,
+    set: (s, v) => { s.reasoning = v as ReasoningEffort },
+    unset: (s) => { delete s.reasoning },
+  },
+  'allow.read': {
+    key: 'allow.read',
+    describe: 'Allow file reading by default (true/false)',
+    parse: (v) => parseBool(v, 'allow.read'),
+    get: (s) => s.allow?.read,
+    set: (s, v) => {
+      s.allow = s.allow ?? {}
+      s.allow.read = v as boolean
+    },
+    unset: (s) => {
+      if (s.allow) delete s.allow.read
+    },
+  },
+  'allow.edit': {
+    key: 'allow.edit',
+    describe: 'Allow file editing and writing by default (true/false)',
+    parse: (v) => parseBool(v, 'allow.edit'),
+    get: (s) => s.allow?.edit,
+    set: (s, v) => {
+      s.allow = s.allow ?? {}
+      s.allow.edit = v as boolean
+    },
+    unset: (s) => {
+      if (s.allow) delete s.allow.edit
+    },
+  },
+  'allow.bash': {
+    key: 'allow.bash',
+    describe: 'Allow bash execution by default (true/false)',
+    parse: (v) => parseBool(v, 'allow.bash'),
+    get: (s) => s.allow?.bash,
+    set: (s, v) => {
+      s.allow = s.allow ?? {}
+      s.allow.bash = v as boolean
+    },
+    unset: (s) => {
+      if (s.allow) delete s.allow.bash
+    },
+  },
+  'allow.destructiveBash': {
+    key: 'allow.destructiveBash',
+    describe: 'Allow unprompted destructive bash execution by default (true/false)',
+    parse: (v) => parseBool(v, 'allow.destructiveBash'),
+    get: (s) => s.allow?.destructiveBash,
+    set: (s, v) => {
+      s.allow = s.allow ?? {}
+      s.allow.destructiveBash = v as boolean
+    },
+    unset: (s) => {
+      if (s.allow) delete s.allow.destructiveBash
+    },
+  },
+  'tools.Bash.foregroundMs': {
+    key: 'tools.Bash.foregroundMs',
+    describe: 'Milliseconds before bash commands move to background (positive integer)',
+    parse: (v) => parsePositiveInt(v, 'tools.Bash.foregroundMs'),
+    get: (s) => s.tools?.Bash?.foregroundMs,
+    set: (s, v) => {
+      s.tools = s.tools ?? {}
+      s.tools.Bash = s.tools.Bash ?? {}
+      s.tools.Bash.foregroundMs = v as number
+    },
+    unset: (s) => {
+      if (s.tools?.Bash) delete s.tools.Bash.foregroundMs
+    },
+  },
+  'tools.Bash.passEnv': {
+    key: 'tools.Bash.passEnv',
+    describe: 'Comma-separated list of additional env vars to pass to bash',
+    parse: (v) => v.split(',').map((x) => x.trim()).filter(Boolean),
+    get: (s) => s.tools?.Bash?.passEnv,
+    set: (s, v) => {
+      s.tools = s.tools ?? {}
+      s.tools.Bash = s.tools.Bash ?? {}
+      s.tools.Bash.passEnv = v as string[]
+    },
+    unset: (s) => {
+      if (s.tools?.Bash) delete s.tools.Bash.passEnv
+    },
+  },
+}
+
+// Add per-tool enabled keys
+const KNOWN_TOOLS = [
+  'ReadFile',
+  'ListDir',
+  'Grep',
+  'WriteFile',
+  'EditFile',
+  'DeleteFile',
+  'AskUser',
+  'Bash',
+  'TaskManager',
+]
+
+for (const t of KNOWN_TOOLS) {
+  const k = `tools.${t}.enabled`
+  KEYS[k] = {
+    key: k,
+    describe: `Enable or disable tool ${t} (true/false)`,
+    parse: (v) => parseBool(v, k),
+    get: (s) => s.tools?.[t]?.enabled,
+    set: (s, v) => {
+      s.tools = s.tools ?? {}
+      s.tools[t] = s.tools[t] ?? {}
+      s.tools[t]!.enabled = v as boolean
+    },
+    unset: (s) => {
+      if (s.tools?.[t]) delete s.tools[t]!.enabled
+    },
+  }
 }

@@ -3,18 +3,26 @@ import { parseModelString, resolveLanguageModel } from './model.ts'
 
 describe('model registry', () => {
   it('parses provider and model ID correctly', () => {
-    expect(parseModelString('anthropic/claude-3-7-sonnet-20250219')).toEqual({
+    expect(parseModelString('anthropic/sonnet-4-turbo')).toEqual({
       provider: 'anthropic',
-      modelId: 'claude-3-7-sonnet-20250219',
+      modelId: 'sonnet-4-turbo',
     })
-    expect(parseModelString('openrouter/anthropic/claude-3.7-sonnet')).toEqual({
+    expect(parseModelString('openrouter/anthropic/sonnet-4')).toEqual({
       provider: 'openrouter',
-      modelId: 'anthropic/claude-3.7-sonnet',
+      modelId: 'anthropic/sonnet-4',
     })
   })
 
   it('rejects colons in model string', () => {
     expect(() => parseModelString('google:gemini-2.5-flash')).toThrow(/Colons are not allowed/)
+  })
+
+  it('throws when Anthropic key is missing', () => {
+    expect(() => resolveLanguageModel('anthropic/sonnet-4-turbo', {})).toThrow(/ANTHROPIC_API_KEY/)
+  })
+
+  it('throws when Google key is missing', () => {
+    expect(() => resolveLanguageModel('google/gemini-2.5-flash', {})).toThrow(/GOOGLE_GENERATIVE_AI_API_KEY/)
   })
 
   it('throws when OpenRouter key is missing', () => {
