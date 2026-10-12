@@ -45,8 +45,8 @@ export function registerCheckpointsCommand(program: Command): void {
   checkpoints
     .command('list', { isDefault: true })
     .description('List checkpoints for a thread')
-    .option('--thread <id|latest>', 'Thread ID or "latest"', 'latest')
-    .option('--json', 'Output as JSON')
+    .option('-t, --thread <id|latest>', 'Thread ID or "latest"', 'latest')
+    .option('-j, --json', 'Output as JSON')
     .action((options) => {
       const db = openDb()
       try {
@@ -78,8 +78,8 @@ export function registerCheckpointsCommand(program: Command): void {
   checkpoints
     .command('show <seq>')
     .description('Show details of a specific checkpoint sequence number')
-    .option('--thread <id|latest>', 'Thread ID or "latest"', 'latest')
-    .option('--json', 'Output as JSON')
+    .option('-t, --thread <id|latest>', 'Thread ID or "latest"', 'latest')
+    .option('-j, --json', 'Output as JSON')
     .action((seqStr: string, options) => {
       const db = openDb()
       try {
@@ -126,9 +126,9 @@ export function registerCheckpointsCommand(program: Command): void {
   checkpoints
     .command('restore <seq>')
     .description('Rewind workspace files to just before checkpoint sequence number')
-    .option('--thread <id|latest>', 'Thread ID or "latest"', 'latest')
-    .option('--dry-run', 'Preview restoration plan without modifying files')
-    .option('--force', 'Overwrite conflicts from external file changes')
+    .option('-t, --thread <id|latest>', 'Thread ID or "latest"', 'latest')
+    .option('-d, --dry-run', 'Preview restoration plan without modifying files')
+    .option('-f, --force', 'Overwrite conflicts from external file changes')
     .action((seqStr: string, options) => {
       const db = openDb()
       try {

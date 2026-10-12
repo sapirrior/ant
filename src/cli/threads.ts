@@ -85,9 +85,9 @@ export function registerThreadsCommand(program: Command): void {
   threads
     .command('list', { isDefault: true })
     .description('List conversation threads')
-    .option('--all', 'Show threads across all directories and include CWD column')
+    .option('-a, --all', 'Show threads across all directories and include CWD column')
     .option('-n, --limit <number>', 'Number of threads to list', '20')
-    .option('--json', 'Output as JSON')
+    .option('-j, --json', 'Output as JSON')
     .action((options) => {
       const db = openDb()
       try {
@@ -117,8 +117,8 @@ export function registerThreadsCommand(program: Command): void {
   threads
     .command('show <id>')
     .description('Show details and transcript for a thread ("<id>" or "latest")')
-    .option('--messages', 'Display message transcript')
-    .option('--json', 'Output as JSON')
+    .option('-m, --messages', 'Display message transcript')
+    .option('-j, --json', 'Output as JSON')
     .action((idOrPrefix: string, options) => {
       const db = openDb()
       try {

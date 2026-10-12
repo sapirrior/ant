@@ -15,29 +15,29 @@ export interface ThemeColors {
 }
 
 export const DARK_THEME: ThemeColors = {
-  primary: [0xfa, 0xb2, 0x83],   // #fab283
-  secondary: [0x5c, 0x9c, 0xf5], // #5c9cf5
-  accent: [0x9d, 0x7c, 0xd8],    // #9d7cd8
-  error: [0xe0, 0x6c, 0x75],     // #e06c75
-  warning: [0xf5, 0xa7, 0x42],   // #f5a742
-  success: [0x7f, 0xd8, 0x8f],   // #7fd88f
-  info: [0x56, 0xb6, 0xc2],      // #56b6c2
-  muted: [0x80, 0x80, 0x80],     // #808080
-  border: [0x55, 0x55, 0x55],
-  text: null,
+  primary: [215, 119, 87],       // Warm brand orange #d77757
+  secondary: [177, 185, 249],     // Light blue-purple #b1b9f9
+  accent: [175, 135, 255],       // Electric violet #af87ff
+  error: [255, 107, 128],        // Bright red #ff6b80
+  warning: [255, 193, 7],        // Bright amber #ffc107
+  success: [78, 186, 101],       // Bright green #4eba65
+  info: [147, 165, 255],         // Medium blue
+  muted: [153, 153, 153],        // Inactive / muted gray
+  border: [80, 80, 80],          // Subtle border
+  text: [255, 255, 255],
 }
 
 export const LIGHT_THEME: ThemeColors = {
-  primary: [0x3b, 0x7d, 0xd8],   // #3b7dd8
-  secondary: [0x7b, 0x5b, 0xb6], // #7b5bb6
-  accent: [0xd6, 0x8c, 0x27],    // #d68c27
-  error: [0xd1, 0x38, 0x3d],     // #d1383d
-  warning: [0xd6, 0x8c, 0x27],   // #d68c27
-  success: [0x3d, 0x9a, 0x57],   // #3d9a57
-  info: [0x31, 0x87, 0x95],      // #318795
-  muted: [0x8a, 0x8a, 0x8a],     // #8a8a8a
-  border: [0xcc, 0xcc, 0xcc],
-  text: null,
+  primary: [215, 119, 87],       // Warm brand orange #d77757
+  secondary: [87, 105, 247],     // Medium blue
+  accent: [135, 0, 255],         // Electric violet
+  error: [171, 43, 63],          // Red
+  warning: [150, 108, 30],       // Amber
+  success: [44, 122, 57],        // Green
+  info: [87, 105, 247],          // Blue
+  muted: [102, 102, 102],        // Inactive gray
+  border: [175, 175, 175],       // Subtle gray
+  text: [0, 0, 0],
 }
 
 // 16-color table explicitly specified in Plan §10.2

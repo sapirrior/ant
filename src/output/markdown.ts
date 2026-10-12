@@ -31,56 +31,61 @@ export function stringWidth(text: string): number {
   return stripAnsi(text).length
 }
 
+export function getTerminalColumns(): number {
+  const envCols = process.env.COLUMNS ? Number.parseInt(process.env.COLUMNS, 10) : NaN
+  if (!Number.isNaN(envCols) && envCols > 0) {
+    return Math.max(20, envCols)
+  }
+  const termCols = process.stdout.columns || 80
+  // Sensible max margin to avoid overly long lines in wide terminals, while wrapping comfortably
+  return Math.max(20, Math.min(termCols - 2, 120))
+}
+
 export function wrapParagraph(text: string, maxWidth: number): string {
   if (maxWidth <= 0 || text.length === 0) return text
 
-  const words = text.split(/ +/)
-  const lines: string[] = []
-  let currentLine = ''
-  let currentLineWidth = 0
+  // Preserve pre-existing newlines within text blocks
+  const rawLines = text.split(EOL)
+  const wrappedLines: string[] = []
 
-  for (const word of words) {
-    if (!word) continue
-    const wordWidth = stringWidth(word)
+  for (const rawLine of rawLines) {
+    if (!rawLine.trim()) {
+      wrappedLines.push('')
+      continue
+    }
 
-    if (currentLine.length === 0) {
-      currentLine = word
-      currentLineWidth = wordWidth
-    } else if (currentLineWidth + 1 + wordWidth <= maxWidth) {
-      currentLine += ' ' + word
-      currentLineWidth += 1 + wordWidth
-    } else {
-      lines.push(currentLine)
-      currentLine = word
-      currentLineWidth = wordWidth
+    // Preserve leading indentation if present
+    const indentMatch = rawLine.match(/^(\s+)/)
+    const indent = indentMatch ? indentMatch[1]! : ''
+    const content = indentMatch ? rawLine.slice(indent.length) : rawLine
+
+    const words = content.split(/ +/)
+    let currentLine = indent
+    let currentLineWidth = stringWidth(indent)
+
+    for (const word of words) {
+      if (!word) continue
+      const wordWidth = stringWidth(word)
+
+      if (currentLine === indent) {
+        currentLine += word
+        currentLineWidth += wordWidth
+      } else if (currentLineWidth + 1 + wordWidth <= maxWidth) {
+        currentLine += ' ' + word
+        currentLineWidth += 1 + wordWidth
+      } else {
+        wrappedLines.push(currentLine)
+        currentLine = indent + word
+        currentLineWidth = stringWidth(indent) + wordWidth
+      }
+    }
+
+    if (currentLine.length > 0) {
+      wrappedLines.push(currentLine)
     }
   }
 
-  if (currentLine.length > 0) {
-    lines.push(currentLine)
-  }
-
-  return lines.join(EOL)
-}
-
-function padAligned(
-  content: string,
-  contentLength: number,
-  width: number,
-  align?: 'center' | 'left' | 'right' | null
-): string {
-  if (contentLength >= width) return content
-  const totalPadding = width - contentLength
-
-  if (align === 'right') {
-    return ' '.repeat(totalPadding) + content
-  }
-  if (align === 'center') {
-    const left = Math.floor(totalPadding / 2)
-    const right = totalPadding - left
-    return ' '.repeat(left) + content + ' '.repeat(right)
-  }
-  return content + ' '.repeat(totalPadding)
+  return wrappedLines.join(EOL)
 }
 
 function formatToken(
@@ -88,12 +93,13 @@ function formatToken(
   fmt: ReturnType<typeof createColorFormatter>,
   listDepth = 0,
   orderedListNumber: number | null = null,
-  parent: Token | null = null
+  parent: Token | null = null,
+  maxWidth: number = 0
 ): string {
   switch (token.type) {
     case 'blockquote': {
       const inner = (token.tokens ?? [])
-        .map((t: Token) => formatToken(t, fmt, 0, null, null))
+        .map((t: Token) => formatToken(t, fmt, 0, null, null, maxWidth > 2 ? maxWidth - 2 : maxWidth))
         .join('')
       const bar = fmt.muted('│')
       return (
@@ -115,7 +121,7 @@ function formatToken(
           // fallback to plaintext
         }
       }
-      return code + EOL + EOL
+      return code + EOL
     }
 
     case 'codespan': {
@@ -142,11 +148,14 @@ function formatToken(
       const headingText = (token.tokens ?? [])
         .map((t: Token) => formatToken(t, fmt, 0, null, null))
         .join('')
+      if (token.depth === 1) {
+        return fmt.underline(fmt.italic(fmt.bold(headingText))) + EOL + EOL
+      }
       return fmt.bold(headingText) + EOL + EOL
     }
 
     case 'hr': {
-      return '---' + EOL + EOL
+      return '---' + EOL
     }
 
     case 'image': {
@@ -176,30 +185,33 @@ function formatToken(
               fmt,
               listDepth,
               token.ordered ? (token.start ?? 1) + index : null,
-              token
+              token,
+              maxWidth
             )
           )
-          .join('') + EOL
+          .join('')
       )
     }
 
     case 'list_item': {
+      const indentWidth = listDepth * 2
+      const remainingWidth = maxWidth > indentWidth ? maxWidth - indentWidth : maxWidth
       return (token.tokens ?? [])
         .map(
           (t: Token) =>
-            `${'  '.repeat(listDepth)}${formatToken(t, fmt, listDepth + 1, orderedListNumber, token)}`
+            `${'  '.repeat(listDepth)}${formatToken(t, fmt, listDepth + 1, orderedListNumber, token, remainingWidth)}`
         )
         .join('')
     }
 
     case 'paragraph': {
-      return (
-        (token.tokens ?? [])
-          .map((t: Token) => formatToken(t, fmt, 0, null, null))
-          .join('') +
-        EOL +
-        EOL
-      )
+      const inner = (token.tokens ?? [])
+        .map((t: Token) => formatToken(t, fmt, 0, null, null, maxWidth))
+        .join('')
+      if (maxWidth && maxWidth > 0) {
+        return wrapParagraph(inner, maxWidth) + EOL
+      }
+      return inner + EOL
     }
 
     case 'space':
@@ -245,33 +257,31 @@ function formatToken(
       tableToken.header.forEach((header: Tokens.Table['header'][number], index: number) => {
         const content =
           header.tokens?.map((t: Token) => formatToken(t, fmt, 0, null, null)).join('') ?? ''
-        const displayText = getDisplayText(header.tokens)
         const width = columnWidths[index]!
-        const align = tableToken.align?.[index]
-        tableOutput += padAligned(content, stringWidth(displayText), width, align) + ' | '
+        const padding = ' '.repeat(Math.max(0, width - stringWidth(content)))
+        tableOutput += `${content}${padding} | `
       })
       tableOutput = tableOutput.trimEnd() + EOL
 
-      tableOutput += '|'
+      tableOutput += '| '
       columnWidths.forEach((width: number) => {
-        tableOutput += '-'.repeat(width + 2) + '|'
+        tableOutput += `${'-'.repeat(width)} | `
       })
-      tableOutput += EOL
+      tableOutput = tableOutput.trimEnd() + EOL
 
       tableToken.rows.forEach((row: Tokens.Table['rows'][number]) => {
         tableOutput += '| '
-        row.forEach((cell: Tokens.Table['rows'][number][number], index: number) => {
+        row.forEach((cell: Tokens.TableCell, index: number) => {
           const content =
             cell.tokens?.map((t: Token) => formatToken(t, fmt, 0, null, null)).join('') ?? ''
-          const displayText = getDisplayText(cell.tokens)
           const width = columnWidths[index]!
-          const align = tableToken.align?.[index]
-          tableOutput += padAligned(content, stringWidth(displayText), width, align) + ' | '
+          const padding = ' '.repeat(Math.max(0, width - stringWidth(content)))
+          tableOutput += `${content}${padding} | `
         })
         tableOutput = tableOutput.trimEnd() + EOL
       })
 
-      return tableOutput + EOL
+      return tableOutput
     }
 
     case 'escape': {
@@ -293,23 +303,128 @@ function formatToken(
 export function renderMarkdown(content: string, options: MarkdownOptions = {}): string {
   configureMarked()
   const fmt = createColorFormatter(options.colorLevel)
+  const columns = options.columns ?? getTerminalColumns()
   const tokens = marked.lexer(content)
-  const terminalCols =
-    options.columns ??
-    (process.stdout.columns ? Math.min(process.stdout.columns - 2, 100) : 80)
-  const cols = Math.max(20, terminalCols)
-
-  const rendered = tokens
-    .map((token: Token) => {
-      const part = formatToken(token, fmt, 0, null, null)
-      if (token.type === 'paragraph') {
-        const trimmed = part.trimEnd()
-        return wrapParagraph(trimmed, cols) + EOL + EOL
-      }
-      return part
-    })
+  return tokens
+    .map((t: Token) => formatToken(t, fmt, 0, null, null, columns))
     .join('')
     .trim()
+}
 
-  return rendered
+/**
+ * Streaming Markdown Renderer
+ * Buffers partial lines and renders completed block/line structures in real-time
+ */
+export class StreamingMarkdownRenderer {
+  private buffer = ''
+  private insideCodeBlock = false
+  private codeLang = ''
+  private readonly fmt: ReturnType<typeof createColorFormatter>
+  private readonly columns: number
+
+  constructor(options: MarkdownOptions = {}) {
+    this.fmt = createColorFormatter(options.colorLevel)
+    this.columns = options.columns ?? getTerminalColumns()
+  }
+
+  append(delta: string): string {
+    this.buffer += delta
+    let output = ''
+
+    while (true) {
+      const newlineIdx = this.buffer.indexOf('\n')
+      if (newlineIdx === -1) break
+
+      const line = this.buffer.slice(0, newlineIdx)
+      this.buffer = this.buffer.slice(newlineIdx + 1)
+
+      output += this.renderLine(line) + '\n'
+    }
+
+    return output
+  }
+
+  flush(): string {
+    if (this.buffer.length === 0) return ''
+    const remaining = this.buffer
+    this.buffer = ''
+    return this.renderLine(remaining)
+  }
+
+  private renderLine(line: string): string {
+    const trimmed = line.trim()
+
+    // 1. Code fence check
+    if (trimmed.startsWith('```')) {
+      if (!this.insideCodeBlock) {
+        this.insideCodeBlock = true
+        this.codeLang = trimmed.slice(3).trim()
+        return ''
+      } else {
+        this.insideCodeBlock = false
+        this.codeLang = ''
+        return ''
+      }
+    }
+
+    // Inside code block
+    if (this.insideCodeBlock) {
+      if (this.fmt.level > 0 && this.codeLang && supportsLanguage(this.codeLang)) {
+        try {
+          return highlight(line, { language: this.codeLang })
+        } catch {
+          // fallback
+        }
+      }
+      return line
+    }
+
+    // 2. Headings
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      const headingText = trimmed.replace(/^#{1,6}\s+/, '')
+      return this.fmt.bold(this.renderInline(headingText))
+    }
+
+    // 3. Blockquotes
+    if (trimmed.startsWith('>')) {
+      const quoteText = trimmed.replace(/^>\s*/, '')
+      return `${this.fmt.muted('│')} ${this.fmt.italic(this.renderInline(quoteText))}`
+    }
+
+    // 4. Horizontal rules
+    if (/^(\*\*\*|---|___)$/.test(trimmed)) {
+      return this.fmt.muted('───')
+    }
+
+    // 5. Unordered lists
+    if (/^[-*+]\s+/.test(trimmed)) {
+      const itemText = trimmed.replace(/^[-*+]\s+/, '')
+      return `  - ${this.renderInline(itemText)}`
+    }
+
+    // 6. Ordered lists
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const match = trimmed.match(/^(\d+\.)\s+(.*)/)
+      if (match) {
+        return `  ${match[1]} ${this.renderInline(match[2]!)}`
+      }
+    }
+
+    // Standard text paragraph line - smart wrap based on terminal columns
+    const rendered = this.renderInline(line)
+    if (this.columns > 0 && stringWidth(rendered) > this.columns) {
+      return wrapParagraph(rendered, this.columns)
+    }
+    return rendered
+  }
+
+  private renderInline(text: string): string {
+    // Codespan `code`
+    let res = text.replace(/`([^`]+)`/g, (_, code) => this.fmt.secondary(code))
+    // Bold **text**
+    res = res.replace(/\*\*([^*]+)\*\*/g, (_, bold) => this.fmt.bold(bold))
+    // Italic *text*
+    res = res.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, em) => this.fmt.italic(em))
+    return res
+  }
 }

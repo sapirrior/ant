@@ -38,4 +38,12 @@ describe('markdown renderer', () => {
     expect(output).toContain('| Name')
     expect(output).toContain('| Alice')
   })
+
+  it('smart wraps long paragraphs to specified terminal width', () => {
+    const longText = 'Ant is a daily-use streaming agent CLI designed for speed, safety, and natural terminal ergonomics with model agnosticism.'
+    const rendered = renderMarkdown(longText, { columns: 40, colorLevel: 0 })
+    for (const line of rendered.split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(40)
+    }
+  })
 })

@@ -14,6 +14,7 @@ import {
 } from '../store/threads.ts'
 import { recordCheckpoint } from '../store/checkpoints.ts'
 import { TaskManagerRegistry } from '../tools/tasks.ts'
+import { StreamingMarkdownRenderer } from '../output/markdown.ts'
 
 export function setupSignalHandler(): {
   readonly controller: AbortController
@@ -167,6 +168,7 @@ export class Engine {
       // Track live streaming vs buffered output
       const isStdoutTTY = Boolean(process.stdout.isTTY)
       const isJsonOutput = config.outputFormat === 'json'
+      const streamRenderer = new StreamingMarkdownRenderer()
       let atLineStart = true
 
       const outcome = await runAgent({
@@ -201,8 +203,16 @@ export class Engine {
           switch (event.type) {
             case 'text-delta': {
               if (isStdoutTTY && !isJsonOutput) {
-                process.stdout.write(event.delta)
-                atLineStart = event.delta.endsWith('\n')
+                if (config.outputFormat === 'md') {
+                  const renderedChunk = streamRenderer.append(event.delta)
+                  if (renderedChunk) {
+                    process.stdout.write(renderedChunk)
+                    atLineStart = renderedChunk.endsWith('\n')
+                  }
+                } else {
+                  process.stdout.write(event.delta)
+                  atLineStart = event.delta.endsWith('\n')
+                }
               }
               break
             }
@@ -253,6 +263,27 @@ export class Engine {
         }
       }
 
+      // Non-TTY stdout gets the final text printed once; TTY flushes remaining stream buffer
+      if (!isStdoutTTY || isJsonOutput) {
+        const renderedOutput = renderOutcome(outcome, {
+          format: config.outputFormat,
+          threadId: thread.id,
+          checkpoints: createdCheckpoints,
+        })
+        writeStdout(renderedOutput)
+      } else {
+        if (config.outputFormat === 'md') {
+          const flushed = streamRenderer.flush()
+          if (flushed) {
+            process.stdout.write(flushed)
+            atLineStart = flushed.endsWith('\n')
+          }
+        }
+        if (!atLineStart) {
+          process.stdout.write('\n')
+        }
+      }
+
       logger.footer({
         status: outcome.status,
         steps: outcome.stepsExecuted,
@@ -262,18 +293,6 @@ export class Engine {
         hasCheckpoints: createdCheckpoints.length > 0,
         error: outcome.error,
       })
-
-      // Non-TTY stdout gets the final text printed once
-      if (!isStdoutTTY || isJsonOutput) {
-        const renderedOutput = renderOutcome(outcome, {
-          format: config.outputFormat,
-          threadId: thread.id,
-          checkpoints: createdCheckpoints,
-        })
-        writeStdout(renderedOutput)
-      } else if (!atLineStart) {
-        process.stdout.write('\n')
-      }
 
       return outcome.exitCode
     } catch (error) {
