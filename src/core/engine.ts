@@ -1,9 +1,17 @@
 import type { ModelMessage } from 'ai'
+import { realpathSync } from 'node:fs'
 import { runAgent } from './agent.ts'
 import { renderOutcome, writeStdout } from '../output/render.ts'
 import { StderrLogger } from '../output/log.ts'
 import type { Config, ExitCode, RunEvent } from './types.ts'
-import { generateThreadId, getLatestThreadId, loadThread, saveThread } from '../store/threads.ts'
+import { openDb, acquireLease, releaseLease } from '../store/db.ts'
+import {
+  createThread,
+  getThread,
+  getMessages,
+  appendMessage,
+  type ThreadRecord,
+} from '../store/threads.ts'
 
 export function setupSignalHandler(): {
   readonly controller: AbortController
@@ -42,27 +50,68 @@ export class Engine {
       }, config.timeoutMs)
     }
 
+    const db = openDb()
+    let activeThreadId: string | undefined
+
     try {
-      let threadId: string
+      let thread: ThreadRecord
       let messages: ModelMessage[] = []
       let isNewThread = true
 
+      let realCwd = config.cwd
+      try {
+        realCwd = realpathSync(config.cwd)
+      } catch {
+        // fallback
+      }
+
       if (config.resumeThreadId) {
-        threadId = config.resumeThreadId
-        messages = await loadThread(threadId)
-        isNewThread = false
-        logger.debug(`Resumed thread ${threadId} with ${messages.length} messages`)
-      } else if (config.continueLatest) {
-        const latestId = await getLatestThreadId()
-        if (!latestId) {
-          throw new Error('No previous thread found to continue. Start a new run first.')
+        thread = getThread(db, config.resumeThreadId, realCwd)
+        if (thread.cwd !== realCwd) {
+          throw new Error(`thread belongs to ${thread.cwd}; cd there first`)
         }
-        threadId = latestId
-        messages = await loadThread(threadId)
+        if (thread.model !== config.model) {
+          logger.debug(`Thread model was ${thread.model}, running with ${config.model}`)
+          db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
+            config.model,
+            Date.now(),
+            thread.id,
+          ])
+          thread.model = config.model
+        }
+        activeThreadId = thread.id
+        acquireLease(db, thread.id)
+        messages = getMessages(db, thread.id)
         isNewThread = false
-        logger.debug(`Continued latest thread ${threadId} with ${messages.length} messages`)
+        logger.debug(`Resumed thread ${thread.id} with ${messages.length} messages`)
+      } else if (config.continueLatest) {
+        thread = getThread(db, 'latest', realCwd)
+        if (thread.cwd !== realCwd) {
+          throw new Error(`thread belongs to ${thread.cwd}; cd there first`)
+        }
+        if (thread.model !== config.model) {
+          logger.debug(`Thread model was ${thread.model}, running with ${config.model}`)
+          db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
+            config.model,
+            Date.now(),
+            thread.id,
+          ])
+          thread.model = config.model
+        }
+        activeThreadId = thread.id
+        acquireLease(db, thread.id)
+        messages = getMessages(db, thread.id)
+        isNewThread = false
+        logger.debug(`Continued latest thread ${thread.id} with ${messages.length} messages`)
       } else {
-        threadId = generateThreadId()
+        thread = createThread(db, {
+          prompt: config.prompt,
+          stdinInput: config.stdinInput,
+          cwd: realCwd,
+          model: config.model,
+        })
+        activeThreadId = thread.id
+        acquireLease(db, thread.id)
       }
 
       let userContent = ''
@@ -76,10 +125,12 @@ export class Engine {
         throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
       }
 
-      messages.push({
+      const userMessage: ModelMessage = {
         role: 'user',
         content: userContent,
-      })
+      }
+      appendMessage(db, thread.id, userMessage)
+      messages.push(userMessage)
 
       const allowedCaps: string[] = []
       if (config.grants.has('fs.read')) allowedCaps.push('read')
@@ -89,8 +140,8 @@ export class Engine {
 
       logger.header({
         model: config.model,
-        threadId,
-        title: userContent.replace(/\s+/g, ' ').slice(0, 80),
+        threadId: thread.id,
+        title: thread.title,
         isNew: isNewThread,
         messageCount: messages.length,
         allowedCaps,
@@ -125,25 +176,35 @@ export class Engine {
       })
 
       if (outcome.text) {
-        messages.push({
+        const assistantMsg: ModelMessage = {
           role: 'assistant',
           content: outcome.text,
-        })
+        }
+        appendMessage(db, thread.id, assistantMsg)
+        messages.push(assistantMsg)
+      } else if (outcome.status !== 'completed') {
+        const stored = getMessages(db, thread.id)
+        if (stored.length > 0 && stored[stored.length - 1]!.role === 'user') {
+          const syntheticMsg: ModelMessage = {
+            role: 'assistant',
+            content: `[ant: run ended with ${outcome.status}: ${outcome.error ?? 'not completed'}]`,
+          }
+          appendMessage(db, thread.id, syntheticMsg)
+        }
       }
-      await saveThread(threadId, messages)
 
       logger.footer({
         status: outcome.status,
         steps: outcome.stepsExecuted,
         totalTokens: outcome.usage?.totalTokens,
         durationMs: Date.now() - startTime,
-        threadId,
+        threadId: thread.id,
         error: outcome.error,
       })
 
       const renderedOutput = renderOutcome(outcome, {
         format: config.outputFormat,
-        threadId,
+        threadId: thread.id,
       })
       writeStdout(renderedOutput)
 
@@ -156,6 +217,14 @@ export class Engine {
       if (timeoutTimer) {
         clearTimeout(timeoutTimer)
       }
+      if (activeThreadId) {
+        try {
+          releaseLease(db, activeThreadId)
+        } catch {
+          // ignore release errors on cleanup
+        }
+      }
+      db.close()
       cleanup()
     }
   }

@@ -1,0 +1,121 @@
+import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Database } from 'bun:sqlite'
+import { acquireLease, getDbPath, openDb, pidAlive, releaseLease } from './db.ts'
+import { createThread } from './threads.ts'
+
+describe('database store', () => {
+  let tempDir: string
+  let origAntHome: string | undefined
+
+  beforeEach(() => {
+    origAntHome = process.env.ANT_HOME
+    tempDir = mkdtempSync(join(tmpdir(), 'ant-db-test-'))
+    process.env.ANT_HOME = tempDir
+  })
+
+  afterEach(() => {
+    if (origAntHome !== undefined) {
+      process.env.ANT_HOME = origAntHome
+    } else {
+      delete process.env.ANT_HOME
+    }
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it('creates ant.db with proper directory and file modes, pragmas and migration', () => {
+    const db = openDb()
+    try {
+      const dbPath = getDbPath()
+      const dirStat = statSync(tempDir)
+      const fileStat = statSync(dbPath)
+
+      // Dir mode (0700) and file mode (0600)
+      expect(dirStat.mode & 0o777).toBe(0o700)
+      expect(fileStat.mode & 0o777).toBe(0o600)
+
+      // Pragmas
+      const journalMode = db.query('PRAGMA journal_mode;').get() as { journal_mode: string }
+      expect(journalMode.journal_mode.toLowerCase()).toBe('wal')
+
+      const foreignKeys = db.query('PRAGMA foreign_keys;').get() as { foreign_keys: number }
+      expect(foreignKeys.foreign_keys).toBe(1)
+
+      const userVersion = db.query('PRAGMA user_version;').get() as { user_version: number }
+      expect(userVersion.user_version).toBe(1)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('throws when database user_version is from a newer version', () => {
+    const dbPath = join(tempDir, 'future.db')
+    const rawDb = new Database(dbPath)
+    rawDb.run('PRAGMA user_version = 999;')
+    rawDb.close()
+
+    expect(() => openDb(dbPath)).toThrow(/created by a newer ant/)
+  })
+
+  it('detects process liveness with pidAlive', () => {
+    expect(pidAlive(process.pid)).toBe(true)
+    // Non-existent PID
+    expect(pidAlive(9999999)).toBe(false)
+  })
+
+  it('manages leases safely', () => {
+    const db = openDb()
+    try {
+      const thread = createThread(db, {
+        prompt: 'Testing lease',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
+
+      // 1. Acquire lease
+      acquireLease(db, thread.id)
+      const row = db.query('SELECT lock_pid FROM threads WHERE id = ?').get(thread.id) as { lock_pid: number }
+      expect(row.lock_pid).toBe(process.pid)
+
+      // 2. Re-acquire by same PID succeeds
+      expect(() => acquireLease(db, thread.id)).not.toThrow()
+
+      // 3. Stale lease from dead PID is taken over
+      db.run('UPDATE threads SET lock_pid = 9999999, lock_at = ? WHERE id = ?', [Date.now() - 10000, thread.id])
+      acquireLease(db, thread.id)
+      const rowAfterStale = db.query('SELECT lock_pid FROM threads WHERE id = ?').get(thread.id) as { lock_pid: number }
+      expect(rowAfterStale.lock_pid).toBe(process.pid)
+
+      // 4. Release lease
+      releaseLease(db, thread.id)
+      const rowAfterRelease = db.query('SELECT lock_pid FROM threads WHERE id = ?').get(thread.id) as { lock_pid: number | null }
+      expect(rowAfterRelease.lock_pid).toBeNull()
+
+      // 5. Active lease by another live process rejects acquisition
+      // Use process.ppid which is guaranteed to be a live parent process (bun / shell)
+      if (process.ppid && pidAlive(process.ppid)) {
+        db.run('UPDATE threads SET lock_pid = ?, lock_at = ? WHERE id = ?', [process.ppid, 1000000, thread.id])
+        expect(() => acquireLease(db, thread.id)).toThrow(new RegExp(`thread ${thread.id} is in use by pid ${process.ppid}`))
+      }
+    } finally {
+      db.close()
+    }
+  })
+
+  it('strictly enforces foreign key constraints', () => {
+    const db = openDb()
+    try {
+      expect(() => {
+        db.run('INSERT INTO messages (thread_id, seq, json) VALUES (?, ?, ?)', [
+          'th_nonexistent_id',
+          1,
+          JSON.stringify({ role: 'user', content: 'hello' }),
+        ])
+      }).toThrow(/FOREIGN KEY constraint failed/i)
+    } finally {
+      db.close()
+    }
+  })
+})

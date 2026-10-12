@@ -2,6 +2,7 @@
 import { Command } from 'commander'
 import { registerConfigCommand } from './cli/config.ts'
 import { registerRunCommand } from './cli/run.ts'
+import { registerThreadsCommand } from './cli/threads.ts'
 
 export function createProgram(): Command {
   const program = new Command()
@@ -11,6 +12,7 @@ export function createProgram(): Command {
     .version('0.1.0')
 
   registerConfigCommand(program)
+  registerThreadsCommand(program)
   registerRunCommand(program)
 
   return program
