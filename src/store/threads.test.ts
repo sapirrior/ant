@@ -72,7 +72,7 @@ describe('threads store', () => {
     }
   })
 
-  it('resolves thread IDs by full ID, unique prefix, and "latest"', () => {
+  it('resolves thread IDs by full ID, unique prefix, and "latest"', async () => {
     const db = openDb()
     try {
       const t1 = createThread(db, {
@@ -80,6 +80,9 @@ describe('threads store', () => {
         cwd: tempDir,
         model: 'google/gemini-2.5-flash',
       })
+
+      // Ensure distinct timestamp
+      await new Promise((r) => setTimeout(r, 5))
 
       const t2 = createThread(db, {
         prompt: 'Second thread',

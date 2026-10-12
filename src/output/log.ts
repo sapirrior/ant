@@ -21,6 +21,8 @@ export interface HeaderOptions {
   isNew: boolean
   messageCount?: number
   allowedCaps: string[]
+  modelMismatchOld?: string
+  toolsList?: string[]
 }
 
 export interface FooterOptions {
@@ -55,6 +57,12 @@ export class StderrLogger {
     }
   }
 
+  warning(message: string): void {
+    if (this.shouldLog('info')) {
+      process.stderr.write(`[ant] ${this.fmt.warning('warning:')} ${message}\n`)
+    }
+  }
+
   info(message: string): void {
     if (this.shouldLog('info')) {
       process.stderr.write(`[ant] ${message}\n`)
@@ -69,7 +77,28 @@ export class StderrLogger {
 
   header(options: HeaderOptions): void {
     if (!this.shouldLog('info')) return
-    process.stderr.write(`${this.fmt.primary('ant')} (${this.fmt.bold(options.model)})\n\n`)
+
+    const providerStr = options.provider ? `  (${this.fmt.muted(options.provider)})` : ''
+    process.stderr.write(`${this.fmt.primary(this.sym.brand)} Using ${this.fmt.primary(options.model)}${providerStr}\n`)
+
+    const statusTag = options.isNew
+      ? '· new'
+      : `· continued (${options.messageCount ?? 0} messages)`
+    process.stderr.write(
+      `  Thread ${this.fmt.accent(options.threadId)}  ${this.fmt.muted(`"${options.title}"`)}  ${this.fmt.muted(statusTag)}\n`
+    )
+
+    if (options.modelMismatchOld) {
+      process.stderr.write(`  ${this.fmt.warning(`warning: thread started with ${options.modelMismatchOld}`)}\n`)
+    }
+
+    const capsStr = options.allowedCaps.length > 0 ? options.allowedCaps.join(' ') : 'none'
+    process.stderr.write(`  Allowed: ${this.fmt.text(capsStr)}\n`)
+
+    if (options.toolsList && this.shouldLog('debug')) {
+      process.stderr.write(`  ${this.fmt.dim(`Tools: ${options.toolsList.join(', ')}`)}\n`)
+    }
+    process.stderr.write('\n')
   }
 
   toolStart(name: string, description: string = ''): void {
@@ -81,7 +110,7 @@ export class StderrLogger {
   toolEnd(summary: string, durationMs?: number, isError: boolean = false): void {
     if (!this.shouldLog('info')) return
     const durStr = durationMs !== undefined ? ` · ${formatDuration(durationMs)}` : ''
-    const summaryColored = isError ? this.fmt.error(summary) : this.fmt.muted(summary)
+    const summaryColored = isError ? this.fmt.error(summary) : this.fmt.success(summary)
     process.stderr.write(`  ${this.fmt.muted(this.sym.result)} ${summaryColored}${this.fmt.muted(durStr)}\n`)
   }
 
@@ -93,12 +122,20 @@ export class StderrLogger {
     const tokenStr = options.totalTokens ? ` · ${formatTokens(options.totalTokens)} tokens` : ''
     const durStr = ` · ${formatDuration(options.durationMs)}`
 
-    process.stderr.write(
-      `\n${statusIcon} Done · ${options.steps} steps${tokenStr}${durStr}\n`
-    )
-
-    if (options.error) {
-      process.stderr.write(`  ${this.fmt.error(options.error)}\n`)
+    if (ok) {
+      process.stderr.write(
+        `\n${statusIcon} Done · ${options.steps} steps${tokenStr}${durStr}\n`
+      )
+    } else {
+      const errReason = options.error ? `: ${options.error}` : ''
+      process.stderr.write(
+        `\n${statusIcon} ${this.fmt.error(`${options.status}${errReason}`)} · ${options.steps} steps${durStr}\n`
+      )
     }
+
+    const checkpointHint = options.hasCheckpoints ? ' · undo edits: ant checkpoints' : ''
+    process.stderr.write(
+      `  Thread ${this.fmt.accent(options.threadId)} · resume: ant --continue${checkpointHint}\n`
+    )
   }
 }

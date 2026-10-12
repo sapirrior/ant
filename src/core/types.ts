@@ -116,6 +116,9 @@ export type ToolName =
   | 'EditFile'
   | 'DeleteFile'
   | 'Bash'
+  | 'TaskManager'
+  | 'WebSearch'
+  | 'WebFetch'
   | 'AskUser'
 
 export interface ToolExecutionContext {
@@ -125,6 +128,16 @@ export interface ToolExecutionContext {
   readonly readState?: Map<string, string>
   readonly threadId?: string
   readonly toolCallId?: string
+  readonly tasks?: import('../tools/tasks.ts').TaskManagerRegistry
+  readonly backgroundEnabled?: boolean
+  readonly foregroundMs?: number
+  readonly passEnv?: string[]
+  readonly ui?: {
+    readonly confirm?: (opts: import('../output/tty.ts').ConfirmPromptOptions) => boolean
+    readonly ask?: (question: string) => string | null
+    readonly toolStart?: (name: string, description: string) => void
+    readonly toolEnd?: (name: string, summary: string, ok: boolean, durationMs: number) => void
+  }
   readonly onCheckpoint?: (
     tool: string,
     toolCallId: string | undefined,

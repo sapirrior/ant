@@ -55,6 +55,8 @@ export const DEFAULT_SETTINGS: Settings = {
     AskUser: { enabled: true },
     Bash: { enabled: true, foregroundMs: 10000, passEnv: [] },
     TaskManager: { enabled: true },
+    WebSearch: { enabled: true },
+    WebFetch: { enabled: true },
   },
 }
 
@@ -477,6 +479,8 @@ const KNOWN_TOOLS = [
   'AskUser',
   'Bash',
   'TaskManager',
+  'WebSearch',
+  'WebFetch',
 ]
 
 for (const t of KNOWN_TOOLS) {

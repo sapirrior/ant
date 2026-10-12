@@ -1,10 +1,25 @@
-import { isStepCount, streamText } from 'ai'
+import {
+  APICallError,
+  RetryError,
+  StreamProviderError,
+  isStepCount,
+  streamText,
+  type ModelMessage,
+} from 'ai'
 import { buildTools } from '../tools/index.ts'
-import type { ToolExecutionContext, ExitCode, ModelOutcome, ModelRunOptions, Status } from './types.ts'
+import type {
+  ToolExecutionContext,
+  ExitCode,
+  ModelOutcome,
+  ModelRunOptions,
+  Status,
+  UsageSummary,
+} from './types.ts'
 import { buildInstructions } from './prompt.ts'
-import { resolveLanguageModel } from './model.ts'
+import { resolveLanguageModel, PROVIDERS } from './model.ts'
+import { TaskManagerRegistry } from '../tools/tasks.ts'
 
-function mapStatusToExitCode(status: Status): ExitCode {
+export function mapStatusToExitCode(status: Status): ExitCode {
   switch (status) {
     case 'completed':
       return 0
@@ -25,11 +40,80 @@ function mapStatusToExitCode(status: Status): ExitCode {
   }
 }
 
-export async function runAgent({ config, messages, signal, threadId, onCheckpoint, onEvent }: ModelRunOptions): Promise<ModelOutcome> {
-  const { model } = resolveLanguageModel(config.model)
+/**
+ * Unwraps and describes AI SDK provider / network errors per Plan §9
+ */
+export function describeModelError(err: unknown, modelProvider?: string): string {
+  let target = err
+
+  // Unwrap RetryError.lastError if present
+  if (RetryError.isInstance(target)) {
+    target = (target as any).lastError ?? target
+  }
+
+  // Network error codes
+  if (target && typeof target === 'object') {
+    const code = (target as { code?: string }).code
+    if (code && ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'].includes(code)) {
+      return `network error: ${code}`
+    }
+  }
+
+  // Check APICallError or StreamProviderError
+  if (APICallError.isInstance(target) || StreamProviderError.isInstance(target)) {
+    const apiErr = target as any
+    const statusCode = apiErr.statusCode ?? apiErr.status
+    const bodyText = typeof apiErr.responseBody === 'string'
+      ? apiErr.responseBody
+      : typeof apiErr.message === 'string'
+      ? apiErr.message
+      : ''
+
+    if (statusCode === 401 || statusCode === 403) {
+      const envVars = modelProvider && PROVIDERS[modelProvider]?.env
+        ? PROVIDERS[modelProvider]!.env.join(' or ')
+        : 'API key'
+      return `authentication failed — check ${envVars}`
+    }
+
+    if (statusCode === 429) {
+      return 'rate limited after retry attempts'
+    }
+
+    if (statusCode >= 500) {
+      return `provider error ${statusCode} after retry attempts`
+    }
+
+    if (statusCode === 400 && /(context|token|length|too large|maximum context)/i.test(bodyText)) {
+      return 'context too long — start a new thread'
+    }
+
+    if (apiErr.message) {
+      return apiErr.message
+    }
+  }
+
+  if (target instanceof Error) {
+    return target.message
+  }
+
+  return String(target)
+}
+
+export interface RunAgentContext {
+  tasks?: TaskManagerRegistry
+  onStepPersist?: (messages: ModelMessage[], usage?: UsageSummary) => void
+}
+
+export async function runAgent(
+  options: ModelRunOptions & { agentContext?: RunAgentContext }
+): Promise<ModelOutcome> {
+  const { config, messages, signal, threadId, onCheckpoint, onEvent, agentContext } = options
+  const { model, provider } = resolveLanguageModel(config.model)
   const instructions = buildInstructions(config)
 
   const readState = new Map<string, string>()
+  const tasks = agentContext?.tasks ?? new TaskManagerRegistry()
 
   const toolContext: ToolExecutionContext = {
     cwd: config.cwd,
@@ -37,12 +121,15 @@ export async function runAgent({ config, messages, signal, threadId, onCheckpoin
     abortSignal: signal,
     readState,
     threadId,
+    tasks,
+    backgroundEnabled: true,
     onCheckpoint,
   }
 
   const tools = buildTools(toolContext)
   let stepsExecuted = 0
   const toolCallStartTimes = new Map<string, number>()
+  let streamError: unknown = null
 
   try {
     const result = streamText({
@@ -52,28 +139,44 @@ export async function runAgent({ config, messages, signal, threadId, onCheckpoin
       tools,
       stopWhen: isStepCount(config.maxSteps),
       abortSignal: signal,
+      maxRetries: config.retries,
+      streamRetries: 1,
+      timeout: {
+        firstChunkMs: 180000,
+        chunkMs: 60000,
+      },
       prepareStep: ({ stepNumber }) => {
+        // Disallow tool calls on the very last step per Plan §9
         if (stepNumber === config.maxSteps - 1) {
           return { toolChoice: 'none' }
         }
         return undefined
       },
-      onStepEnd: ({ stepNumber, finishReason, usage }) => {
-        stepsExecuted = stepNumber + 1
+      onStepEnd: (step) => {
+        stepsExecuted++
+        const stepUsage: UsageSummary | undefined = step.usage
+          ? {
+              inputTokens: step.usage.inputTokens,
+              outputTokens: step.usage.outputTokens,
+              totalTokens: step.usage.totalTokens,
+            }
+          : undefined
+
+        // Persist step messages if callback provided
+        if (step.response?.messages) {
+          agentContext?.onStepPersist?.(step.response.messages as ModelMessage[], stepUsage)
+        }
+
         onEvent?.({
           type: 'step-finish',
           stepNumber: stepsExecuted,
-          finishReason,
-          usage: usage
-            ? {
-                inputTokens: usage.inputTokens,
-                outputTokens: usage.outputTokens,
-                totalTokens: usage.totalTokens,
-              }
-            : undefined,
+          finishReason: step.finishReason,
+          usage: stepUsage,
         })
       },
-      onError: () => {},
+      onError: (err) => {
+        if (!streamError) streamError = err
+      },
     })
 
     for await (const part of result.stream) {
@@ -106,25 +209,45 @@ export async function runAgent({ config, messages, signal, threadId, onCheckpoin
           })
           break
         }
+        case 'tool-error': {
+          const startTime = toolCallStartTimes.get((part as any).toolCallId) ?? Date.now()
+          const durationMs = Date.now() - startTime
+          onEvent?.({
+            type: 'tool-result',
+            callId: (part as any).toolCallId,
+            toolName: (part as any).toolName,
+            output: (part as any).error,
+            durationMs,
+            isError: true,
+          })
+          break
+        }
         case 'error': {
+          if (!streamError) streamError = (part as any).error
           break
         }
       }
     }
 
     if (signal.aborted) {
+      const reason = (signal as any).reason
+      const isTimeout = reason === 'timeout'
+      const isSigterm = reason === 'SIGTERM'
+      const status: Status = isTimeout ? 'timeout' : 'cancelled'
+      const exitCode: ExitCode = isTimeout ? 4 : isSigterm ? 143 : 130
       return {
-        status: 'cancelled',
-        exitCode: 130,
+        status,
+        exitCode,
         text: '',
         stepsExecuted,
-        error: 'Operation aborted by user signal.',
+        error: isTimeout ? 'Execution timed out.' : 'Operation aborted by user signal.',
       }
     }
 
-    const finalText = await result.text
+    const finalStep = await result.finalStep
+    const finalText = finalStep?.text ?? (await result.text)
+    const finalFinishReason = finalStep?.finishReason ?? (await result.finishReason)
     const finalUsage = await result.usage
-    const finalFinishReason = await result.finishReason
 
     let status: Status = 'completed'
     if (stepsExecuted >= config.maxSteps && finalFinishReason === 'tool-calls') {
@@ -152,22 +275,27 @@ export async function runAgent({ config, messages, signal, threadId, onCheckpoin
     }
   } catch (error) {
     if (signal.aborted) {
+      const reason = (signal as any).reason
+      const isTimeout = reason === 'timeout'
+      const isSigterm = reason === 'SIGTERM'
+      const status: Status = isTimeout ? 'timeout' : 'cancelled'
+      const exitCode: ExitCode = isTimeout ? 4 : isSigterm ? 143 : 130
       return {
-        status: 'cancelled',
-        exitCode: 130,
+        status,
+        exitCode,
         text: '',
         stepsExecuted,
-        error: 'Execution cancelled.',
+        error: isTimeout ? 'Execution timed out.' : 'Operation aborted by user signal.',
       }
     }
 
-    const errorMessage = error instanceof Error ? error.message : String(error)
+    const describedError = describeModelError(error || streamError, provider)
     return {
       status: 'model_error',
       exitCode: 3,
       text: '',
       stepsExecuted,
-      error: errorMessage,
+      error: describedError,
     }
   }
 }

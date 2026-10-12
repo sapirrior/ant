@@ -120,7 +120,7 @@ export function resolveThreadId(db: Database, idOrPrefix: string, cwd?: string):
     }
 
     const row = db
-      .query('SELECT id FROM threads WHERE cwd = ? ORDER BY updated_at DESC LIMIT 1')
+      .query('SELECT id FROM threads WHERE cwd = ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1')
       .get(targetCwd) as { id: string } | null
 
     if (!row) {

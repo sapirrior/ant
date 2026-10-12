@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs'
 import { runAgent } from './agent.ts'
 import { renderOutcome, writeStdout } from '../output/render.ts'
 import { StderrLogger } from '../output/log.ts'
-import type { Config, ExitCode, RunEvent } from './types.ts'
+import type { Config, ExitCode, RunEvent, UsageSummary } from './types.ts'
 import { openDb, acquireLease, releaseLease } from '../store/db.ts'
 import {
   createThread,
@@ -13,6 +13,7 @@ import {
   type ThreadRecord,
 } from '../store/threads.ts'
 import { recordCheckpoint } from '../store/checkpoints.ts'
+import { TaskManagerRegistry } from '../tools/tasks.ts'
 
 export function setupSignalHandler(): {
   readonly controller: AbortController
@@ -20,18 +21,29 @@ export function setupSignalHandler(): {
 } {
   const controller = new AbortController()
 
-  const handleSignal = () => {
+  const handleSigint = () => {
     if (!controller.signal.aborted) {
+      ;(controller.signal as any).reason = 'SIGINT'
+      controller.abort()
+    } else {
+      // Second SIGINT forces hard exit 130
+      process.exit(130)
+    }
+  }
+
+  const handleSigterm = () => {
+    if (!controller.signal.aborted) {
+      ;(controller.signal as any).reason = 'SIGTERM'
       controller.abort()
     }
   }
 
-  process.on('SIGINT', handleSignal)
-  process.on('SIGTERM', handleSignal)
+  process.on('SIGINT', handleSigint)
+  process.on('SIGTERM', handleSigterm)
 
   const cleanup = () => {
-    process.off('SIGINT', handleSignal)
-    process.off('SIGTERM', handleSignal)
+    process.off('SIGINT', handleSigint)
+    process.off('SIGTERM', handleSigterm)
   }
 
   return { controller, cleanup }
@@ -42,13 +54,17 @@ export class Engine {
     const logger = new StderrLogger(config.logLevel)
     const { controller, cleanup } = setupSignalHandler()
     const startTime = Date.now()
+    const tasks = new TaskManagerRegistry()
+    const createdCheckpoints: number[] = []
 
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined
     if (config.timeoutMs > 0) {
       timeoutTimer = setTimeout(() => {
         logger.error(`Execution timed out after ${config.timeoutMs}ms`)
+        ;(controller.signal as any).reason = 'timeout'
         controller.abort()
       }, config.timeoutMs)
+      timeoutTimer.unref()
     }
 
     const db = openDb()
@@ -58,6 +74,7 @@ export class Engine {
       let thread: ThreadRecord
       let messages: ModelMessage[] = []
       let isNewThread = true
+      let modelMismatchOld: string | undefined
 
       let realCwd = config.cwd
       try {
@@ -72,7 +89,7 @@ export class Engine {
           throw new Error(`thread belongs to ${thread.cwd}; cd there first`)
         }
         if (thread.model !== config.model) {
-          logger.debug(`Thread model was ${thread.model}, running with ${config.model}`)
+          modelMismatchOld = thread.model
           db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
             config.model,
             Date.now(),
@@ -84,14 +101,13 @@ export class Engine {
         acquireLease(db, thread.id)
         messages = getMessages(db, thread.id)
         isNewThread = false
-        logger.debug(`Resumed thread ${thread.id} with ${messages.length} messages`)
       } else if (config.continueLatest) {
         thread = getThread(db, 'latest', realCwd)
         if (thread.cwd !== realCwd) {
           throw new Error(`thread belongs to ${thread.cwd}; cd there first`)
         }
         if (thread.model !== config.model) {
-          logger.debug(`Thread model was ${thread.model}, running with ${config.model}`)
+          modelMismatchOld = thread.model
           db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
             config.model,
             Date.now(),
@@ -103,7 +119,6 @@ export class Engine {
         acquireLease(db, thread.id)
         messages = getMessages(db, thread.id)
         isNewThread = false
-        logger.debug(`Continued latest thread ${thread.id} with ${messages.length} messages`)
       } else {
         thread = createThread(db, {
           prompt: config.prompt,
@@ -146,53 +161,93 @@ export class Engine {
         isNew: isNewThread,
         messageCount: messages.length,
         allowedCaps,
+        modelMismatchOld,
       })
+
+      // Track live streaming vs buffered output
+      const isStdoutTTY = Boolean(process.stdout.isTTY)
+      const isJsonOutput = config.outputFormat === 'json'
+      let atLineStart = true
 
       const outcome = await runAgent({
         config,
         messages,
         signal: controller.signal,
         threadId: thread.id,
+        agentContext: {
+          tasks,
+          onStepPersist: (stepMessages: ModelMessage[], usage?: UsageSummary) => {
+            for (const msg of stepMessages) {
+              appendMessage(db, thread.id, msg)
+            }
+            if (usage?.inputTokens || usage?.outputTokens) {
+              db.run(
+                `UPDATE threads SET 
+                   input_tokens = input_tokens + ?, 
+                   output_tokens = output_tokens + ?,
+                   updated_at = ?
+                 WHERE id = ?`,
+                [usage.inputTokens ?? 0, usage.outputTokens ?? 0, Date.now(), thread.id]
+              )
+            }
+          },
+        },
         onCheckpoint: (tool, toolCallId, files) => {
-          return recordCheckpoint(db, thread.id, tool, toolCallId, files)
+          const seq = recordCheckpoint(db, thread.id, tool, toolCallId, files)
+          createdCheckpoints.push(seq)
+          return seq
         },
         onEvent: (event: RunEvent) => {
           switch (event.type) {
+            case 'text-delta': {
+              if (isStdoutTTY && !isJsonOutput) {
+                process.stdout.write(event.delta)
+                atLineStart = event.delta.endsWith('\n')
+              }
+              break
+            }
             case 'tool-call': {
+              if (isStdoutTTY && !atLineStart) {
+                process.stdout.write('\n')
+                atLineStart = true
+              }
               let summary: string | undefined
               if (typeof event.input === 'object' && event.input !== null) {
                 const obj = event.input as Record<string, unknown>
                 if (typeof obj.path === 'string') summary = obj.path
                 else if (typeof obj.command === 'string') summary = `"${obj.command.slice(0, 50)}"`
+                else if (typeof obj.query === 'string') summary = `"${obj.query.slice(0, 50)}"`
+                else if (typeof obj.url === 'string') summary = obj.url.slice(0, 50)
                 else if (typeof obj.pattern === 'string') summary = `/${obj.pattern}/`
+                else if (typeof obj.action === 'string') summary = `${obj.action} ${obj.taskId ?? ''}`.trim()
                 else if (typeof obj.question === 'string') summary = `"${obj.question.slice(0, 50)}"`
               }
               logger.toolStart(event.toolName, summary)
               break
             }
-            case 'tool-result':
+            case 'tool-result': {
+              if (isStdoutTTY && !atLineStart) {
+                process.stdout.write('\n')
+                atLineStart = true
+              }
               logger.toolEnd('done', event.durationMs, Boolean(event.isError))
               break
-            case 'step-finish':
+            }
+            case 'step-finish': {
               logger.debug(`step ${event.stepNumber} finished (${event.finishReason})`)
               break
+            }
           }
         },
       })
 
-      if (outcome.text) {
-        const assistantMsg: ModelMessage = {
-          role: 'assistant',
-          content: outcome.text,
-        }
-        appendMessage(db, thread.id, assistantMsg)
-        messages.push(assistantMsg)
-      } else if (outcome.status !== 'completed') {
+      // If run ended without an assistant message, append synthetic one for provider alternation
+      if (outcome.status !== 'completed' && !outcome.text) {
         const stored = getMessages(db, thread.id)
         if (stored.length > 0 && stored[stored.length - 1]!.role === 'user') {
           const syntheticMsg: ModelMessage = {
             role: 'assistant',
-            content: `[ant: run ended with ${outcome.status}: ${outcome.error ?? 'not completed'}]`,
+            content: `[ant: run ended with ${outcome.status}: ${outcome.error ?? 'incomplete'}]`,
           }
           appendMessage(db, thread.id, syntheticMsg)
         }
@@ -204,14 +259,21 @@ export class Engine {
         totalTokens: outcome.usage?.totalTokens,
         durationMs: Date.now() - startTime,
         threadId: thread.id,
+        hasCheckpoints: createdCheckpoints.length > 0,
         error: outcome.error,
       })
 
-      const renderedOutput = renderOutcome(outcome, {
-        format: config.outputFormat,
-        threadId: thread.id,
-      })
-      writeStdout(renderedOutput)
+      // Non-TTY stdout gets the final text printed once
+      if (!isStdoutTTY || isJsonOutput) {
+        const renderedOutput = renderOutcome(outcome, {
+          format: config.outputFormat,
+          threadId: thread.id,
+          checkpoints: createdCheckpoints,
+        })
+        writeStdout(renderedOutput)
+      } else if (!atLineStart) {
+        process.stdout.write('\n')
+      }
 
       return outcome.exitCode
     } catch (error) {
@@ -222,11 +284,12 @@ export class Engine {
       if (timeoutTimer) {
         clearTimeout(timeoutTimer)
       }
+      tasks.killAll()
       if (activeThreadId) {
         try {
           releaseLease(db, activeThreadId)
         } catch {
-          // ignore release errors on cleanup
+          // ignore lease release failure on final teardown
         }
       }
       db.close()
