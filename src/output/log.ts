@@ -53,50 +53,46 @@ export class StderrLogger {
 
   error(message: string): void {
     if (this.shouldLog('error')) {
-      process.stderr.write(`[ant] ${this.fmt.error('error:')} ${message}\n`)
+      process.stderr.write(`${this.fmt.error('error:')} ${message}\n`)
     }
   }
 
   warning(message: string): void {
     if (this.shouldLog('info')) {
-      process.stderr.write(`[ant] ${this.fmt.warning('warning:')} ${message}\n`)
+      process.stderr.write(`${this.fmt.warning('warning:')} ${message}\n`)
     }
   }
 
   info(message: string): void {
     if (this.shouldLog('info')) {
-      process.stderr.write(`[ant] ${message}\n`)
+      process.stderr.write(`${message}\n`)
     }
   }
 
   debug(message: string): void {
     if (this.shouldLog('debug')) {
-      process.stderr.write(`${this.fmt.dim('[debug]')} ${message}\n`)
+      process.stderr.write(`${this.fmt.dim(message)}\n`)
     }
   }
 
   header(options: HeaderOptions): void {
     if (!this.shouldLog('info')) return
 
-    const providerStr = options.provider ? `  (${this.fmt.muted(options.provider)})` : ''
-    process.stderr.write(`${this.fmt.primary(this.sym.brand)} Using ${this.fmt.primary(options.model)}${providerStr}\n`)
-
-    const statusTag = options.isNew
-      ? '· new'
-      : `· continued (${options.messageCount ?? 0} messages)`
+    const providerStr = options.provider ? ` (${options.provider})` : ''
     process.stderr.write(
-      `  Thread ${this.fmt.accent(options.threadId)}  ${this.fmt.muted(`"${options.title}"`)}  ${this.fmt.muted(statusTag)}\n`
+      `${this.fmt.bold(options.model)}${this.fmt.muted(providerStr)} ${this.fmt.muted('·')} ${this.fmt.accent(options.threadId)}\n`
     )
 
     if (options.modelMismatchOld) {
-      process.stderr.write(`  ${this.fmt.warning(`warning: thread started with ${options.modelMismatchOld}`)}\n`)
+      process.stderr.write(
+        `  ${this.fmt.warning(`note: model changed from ${options.modelMismatchOld}`)}\n`
+      )
     }
 
-    const capsStr = options.allowedCaps.length > 0 ? options.allowedCaps.join(' ') : 'none'
-    process.stderr.write(`  Allowed: ${this.fmt.text(capsStr)}\n`)
-
     if (options.toolsList && this.shouldLog('debug')) {
-      process.stderr.write(`  ${this.fmt.dim(`Tools: ${options.toolsList.join(', ')}`)}\n`)
+      process.stderr.write(
+        `  ${this.fmt.muted(`tools: ${options.toolsList.join(', ')}`)}\n`
+      )
     }
     process.stderr.write('\n')
   }
@@ -118,24 +114,24 @@ export class StderrLogger {
     if (!this.shouldLog('info')) return
 
     const ok = options.status === 'completed'
-    const statusIcon = ok ? this.fmt.success(this.sym.ok) : this.fmt.error(this.sym.fail)
+    const statusText = ok ? this.fmt.success('done') : this.fmt.error(options.status)
     const tokenStr = options.totalTokens ? ` · ${formatTokens(options.totalTokens)} tokens` : ''
     const durStr = ` · ${formatDuration(options.durationMs)}`
 
     if (ok) {
       process.stderr.write(
-        `\n${statusIcon} Done · ${options.steps} steps${tokenStr}${durStr}\n`
+        `\n${statusText} · ${options.steps} step(s)${tokenStr}${durStr}\n`
       )
     } else {
       const errReason = options.error ? `: ${options.error}` : ''
       process.stderr.write(
-        `\n${statusIcon} ${this.fmt.error(`${options.status}${errReason}`)} · ${options.steps} steps${durStr}\n`
+        `\n${statusText}${errReason} · ${options.steps} step(s)${durStr}\n`
       )
     }
 
-    const checkpointHint = options.hasCheckpoints ? ' · undo edits: ant checkpoints' : ''
+    const checkpointHint = options.hasCheckpoints ? ' · undo: ant checkpoints' : ''
     process.stderr.write(
-      `  Thread ${this.fmt.accent(options.threadId)} · resume: ant --continue${checkpointHint}\n`
+      `${this.fmt.muted('resume:')} ant -r ${this.fmt.accent(options.threadId)}${this.fmt.muted(checkpointHint)}\n`
     )
   }
 }
