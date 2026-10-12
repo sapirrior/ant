@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { Command } from 'commander'
 import { registerConfigCommand } from './commands/ConfigCommand.ts'
 import { registerRunCommand } from './commands/RunCommand.ts'

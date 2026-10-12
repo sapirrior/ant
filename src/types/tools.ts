@@ -1,4 +1,4 @@
-import type { Capability, Grants } from './config.ts'
+import type { Grants } from './config.ts'
 
 export type ToolName =
   | 'ReadFile'

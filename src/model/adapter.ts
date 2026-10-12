@@ -54,6 +54,7 @@ export class AiSdkModelAdapter implements ModelPort {
           if (stepNumber === config.maxSteps - 1) {
             return { toolChoice: 'none' }
           }
+          return undefined
         },
         onStepEnd: ({ stepNumber, finishReason, usage }) => {
           stepsExecuted = stepNumber + 1

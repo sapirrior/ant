@@ -1,5 +1,4 @@
 node_modules/
-bun.lock
 bun.lockb
 dist/
 *.log
@@ -7,5 +6,4 @@ dist/
 .env.*
 !.env.example
 .DS_Store
-.test_scratch*
-ant
+/ant

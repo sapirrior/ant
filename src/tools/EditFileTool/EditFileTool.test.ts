@@ -1,25 +1,27 @@
 import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createEditFileTool } from './EditFileTool.ts'
 import type { ToolExecutionContext, ToolExecutionResult } from '../../types/tools.ts'
 
 describe('EditFileTool', () => {
-  const testDir = join(process.cwd(), '.test_scratch_edit')
-  const testFile = join(testDir, 'sample.txt')
-
-  const context: ToolExecutionContext = {
-    cwd: testDir,
-    grants: {
-      has: (cap) => cap === 'fs.write' || cap === 'fs.read',
-      capabilities: new Set(['fs.write', 'fs.read']),
-    },
-  }
+  let testDir: string
+  let testFile: string
+  let context: ToolExecutionContext
 
   const execOptions = { messages: [], toolCallId: '1', context: {} }
 
   beforeEach(() => {
-    mkdirSync(testDir, { recursive: true })
+    testDir = mkdtempSync(join(tmpdir(), 'ant-edit-test-'))
+    testFile = join(testDir, 'sample.txt')
+    context = {
+      cwd: testDir,
+      grants: {
+        has: (cap) => cap === 'fs.write' || cap === 'fs.read',
+        capabilities: new Set(['fs.write', 'fs.read']),
+      },
+    }
     writeFileSync(testFile, 'line 1\nline 2\nline 3\n', 'utf-8')
   })
 
