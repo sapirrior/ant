@@ -1,0 +1,29 @@
+{
+  "name": "ant",
+  "version": "0.1.0",
+  "description": "A daily-use, streaming, model-agnostic AI agent CLI",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ant": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "bun --no-env-file run src/main.ts",
+    "dev": "bun --no-env-file --watch run src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build --compile --no-env-file --target=bun-linux-arm64 src/main.ts --outfile=ant"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.78",
+    "@ai-sdk/google": "4.0.93",
+    "@ai-sdk/openai": "4.0.91",
+    "@ai-sdk/openai-compatible": "3.0.67",
+    "ai": "7.0.137",
+    "commander": "14.0.3",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
