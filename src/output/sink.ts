@@ -124,7 +124,7 @@ export class StreamJsonSink implements OutputSink {
     this.writeLine({
       type: 'init',
       ...initData,
-      antVersion: pkg.version ?? '0.2.0',
+      antVersion: pkg.version,
     })
   }
 

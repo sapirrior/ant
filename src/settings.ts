@@ -490,7 +490,6 @@ const KNOWN_TOOLS = [
   'WriteFile',
   'EditFile',
   'DeleteFile',
-  'AskUser',
   'Bash',
   'TaskManager',
   'WebSearch',

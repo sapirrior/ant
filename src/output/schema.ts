@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import pkg from '../../package.json' with { type: 'json' }
 
 export const SCHEMA_VERSION = 1
 
@@ -60,7 +61,7 @@ export const StreamInitEventSchema = StreamBaseEventSchema.extend({
   grants: z.array(z.string()),
   tools: z.array(z.string()),
   resumed: z.boolean(),
-  antVersion: z.string().default('0.1.0'),
+  antVersion: z.string().default(pkg.version),
   modelChangedFrom: z.string().nullable().optional(),
 })
 

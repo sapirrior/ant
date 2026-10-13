@@ -17,14 +17,26 @@ export function resolveWithinRoot(targetPath: string, rootDir: string): string {
     throw new Error(`Access denied: path "${targetPath}" resolves to "${resolvedTarget}", which is outside workspace root "${resolvedRoot}".`)
   }
 
-  // Check realpath if the file/target or its ancestor exists to prevent symlink traversal escapes
-  if (existsSync(resolvedTarget)) {
-    const realTarget = realpathSync(resolvedTarget)
-    const relReal = relative(resolvedRoot, realTarget)
-    if (relReal === '..' || relReal.startsWith(`..${sep}`) || isAbsolute(relReal)) {
-      throw new Error(`Access denied: symlink "${targetPath}" resolves to "${realTarget}", which is outside workspace root "${resolvedRoot}".`)
+  // Check realpath if target exists or if an existing ancestor is inside an existing root
+  if (existsSync(resolvedRoot)) {
+    let current = resolvedTarget
+    while (!existsSync(current)) {
+      const parent = resolve(current, '..')
+      if (parent === current) break
+      current = parent
     }
-    return realTarget
+
+    if (existsSync(current)) {
+      const realAncestor = realpathSync(current)
+      const relReal = relative(resolvedRoot, realAncestor)
+      if (relReal === '..' || relReal.startsWith(`..${sep}`) || isAbsolute(relReal)) {
+        throw new Error(`Access denied: path "${targetPath}" traverses symlink escaping workspace root "${resolvedRoot}".`)
+      }
+    }
+  }
+
+  if (existsSync(resolvedTarget)) {
+    return realpathSync(resolvedTarget)
   }
 
   return resolvedTarget

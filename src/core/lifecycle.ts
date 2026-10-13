@@ -97,6 +97,17 @@ export function createLifecycle(options?: {
       graceTimer = undefined
     }
 
+    for (const fn of cleanups.slice().reverse()) {
+      try {
+        const res = fn()
+        if (res && typeof (res as any).catch === 'function') {
+          ;(res as Promise<void>).catch(() => {})
+        }
+      } catch {
+        // Suppress errors during cleanup
+      }
+    }
+
     process.off('SIGINT', onSigint)
     process.off('SIGTERM', onSigterm)
     process.off('SIGHUP', onSighup)

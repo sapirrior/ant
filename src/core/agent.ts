@@ -268,6 +268,15 @@ export async function runAgent(
       return abortOutcome(signal, stepsExecuted)
     }
 
+    try {
+      const allResponseMessages = (await result.responseMessages) as ModelMessage[]
+      if (allResponseMessages && allResponseMessages.length > 0 && agentContext?.onStepPersist) {
+        agentContext.onStepPersist(allResponseMessages)
+      }
+    } catch {
+      // Non-fatal if stream aborted or ended prematurely
+    }
+
     const finalStep = await result.finalStep
     const finalText = finalStep?.text ?? (await result.text)
     const finalFinishReason = finalStep?.finishReason ?? (await result.finishReason)

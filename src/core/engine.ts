@@ -237,6 +237,18 @@ export class Engine {
         startTime,
       })
 
+      const activeToolsList: string[] = []
+      if (config.grants.has('fs.read')) {
+        activeToolsList.push('ReadFile', 'ListDir', 'Grep')
+      }
+      if (config.grants.has('fs.write')) {
+        activeToolsList.push('WriteFile', 'EditFile', 'DeleteFile')
+      }
+      if (config.grants.has('shell.run')) {
+        activeToolsList.push('Bash', 'TaskManager')
+      }
+      activeToolsList.push('WebSearch', 'WebFetch')
+
       if (sink instanceof StreamJsonSink) {
         sink.emitInit({
           threadId: thread.id,
@@ -244,7 +256,7 @@ export class Engine {
           cwd: config.cwd,
           effort: config.effort ?? null,
           grants: allowedCaps,
-          tools: [],
+          tools: activeToolsList,
           resumed: !isNewThread,
         })
       }
