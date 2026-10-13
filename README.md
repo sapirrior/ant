@@ -1,199 +1,155 @@
-# ant
+# ant 🐜
 
-A fast, daily-use, streaming, model-agnostic AI agent CLI for developers. Built on [Bun](https://bun.sh) with atomic SQLite storage, content-addressed CAS file checkpoints, allowlist Bash security policy, and background task management.
+> **A fast, model-agnostic AI agent CLI built for your daily terminal workflow.**
 
-`ant` is engineered to do one thing and do it extremely well: execute developer instructions autonomously in the terminal and in automated workflows, streaming diagnostics to `stderr` and clean machine or human outputs to `stdout`.
-
----
-
-## Key Features
-
-* **Autonomous Execution:** Designed for non-blocking terminal runs, automation, subagents, and headless CI pipelines. Never blocks or deadlocks on unanswerable interactive prompts.
-* **Model Agnostic:** Works with Anthropic (`anthropic/...`), Google (`google/...`), OpenRouter (`openrouter/...`), and custom OpenAI-compatible endpoints (`custom/...`). Preflight credential validation checks keys before creating threads.
-* **Storage & Threads (`ant threads`):** SQLite (`$ANT_HOME/ant.db`) in WAL mode with process-level leases (`lock_pid`). Multi-turn sessions persist AI SDK messages verbatim with automatic interrupted session repair on load.
-* **Content-Addressed CAS Checkpoints (`ant checkpoints`):** Every file modification (`WriteFile`, `EditFile`, `DeleteFile`) snapshots contents with SHA-256 before mutating. Conflicted workspace edits prevent accidental overwrites unless `--force` is provided. Rewind cleanly with `ant checkpoints restore <n>`.
-* **Safe Bash Policy & TaskManager:** Allowlist command classifier (`safe`, `ask`, `blocked`). Commands taking longer than the foreground window automatically migrate to background tasks (`TaskManager`) with non-blocking output cursors and graceful shutdown.
-* **Web Tools (`WebSearch` & `WebFetch`):** Public informational web searches via DuckDuckGo and readable HTML-to-markdown chunked fetching.
-* **Reasoning Control:** Configure thinking effort (`provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) via `--effort <level>` or `ant config set effort <level>`.
-* **Headless Streaming & Machine Envelopes:** Real-time event streaming (`-o stream-json`) emitting compact NDJSON lines (`init`, `text`, `tool_call`, `tool_result`, `step`, and terminal `result`), or compact single-line JSON (`-o json`).
+`ant` is an autonomous developer companion designed for speed, safety, and scripting. It runs your terminal tasks, inspects code, edits files, and connects to any AI provider—streaming output in real time without getting stuck on interactive prompts.
 
 ---
 
-## Installation
+## ✨ Why ant?
 
-### Prerequisites
-* [Bun](https://bun.sh) >= 1.2
-* Linux or macOS
+* ⚡ **Model Agnostic** — Switch seamlessly between Anthropic, Google Gemini, OpenRouter, or custom OpenAI-compatible models.
+* 🛡️ **Built-in Safety & Reversible Edits** — Automatic file snapshots before any modification. Made a mistake? Rewind with `ant checkpoints restore`.
+* 🔒 **Safe Shell Execution** — Allowlist-based command analyzer prevents accidental or rogue destructive commands.
+* 🔄 **Multi-turn Context & Resumable Sessions** — Continue conversations right where you left off in any repository.
+* 🌐 **Built-in Search & Web Fetch** — Search the web and read documentation directly within the agent loop.
+* 🤖 **Pipe & Automation Friendly** — Clean `stdout` for pipes and scripts (`-o json` or `-o stream-json`), with rich diagnostics sent to `stderr`.
+
+---
+
+## 🚀 Quickstart
+
+### 1. Install
 
 ```bash
 git clone https://github.com/your-username/ant.git
 cd ant
-
-# Install dependencies (use npm on Android/Termux environments)
 npm install
-
-# Run typecheck and tests
-bun run typecheck
-bun test
-
-# Build compiled standalone binary
 bun run build
 ```
 
----
+*(Prerequisites: [Bun](https://bun.sh) >= 1.2 on Linux or macOS)*
 
-## Configuration & Precedence
+### 2. Configure Your Model
 
-Precedence order:
-1. **CLI flags** (`--model`, `--timeout`, `--effort`, etc.)
-2. **Environment variables** (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `ANT_HOME`)
-3. **Persisted settings** (`$ANT_HOME/settings.json`, default `~/.ant/settings.json`)
-
-### Settings CLI (`ant config`)
+Set your API key and default model once:
 
 ```bash
-# View path to settings.json
-ant config path
-
-# View all active settings
-ant config get
-
-# Set persistent default model and reasoning effort
+# Google Gemini
+export GEMINI_API_KEY="your-api-key"
 ant config set model google/gemini-2.5-flash
-ant config set effort medium
 
-# Set capability defaults and timeout
-ant config set allow.read true
-ant config set allow.bash true
-ant config set timeout 10m
-
-# Remove a setting
-ant config unset timeout
+# Or Anthropic Claude
+export ANTHROPIC_API_KEY="your-api-key"
+ant config set model anthropic/claude-3-7-sonnet-20250219
 ```
 
----
+### 3. Run Your First Command
 
-## Usage & Workflows
-
-### 1. Direct Instructions
 ```bash
 # Ask a direct question
-ant "Explain the difference between interface and type in TypeScript"
+ant "Explain how to write a custom middleware in Hono"
 
-# Inspect files in the workspace
-ant --allow-read "Find all failing tests in this project"
-
-# Make surgical file edits
-ant --allow-edit "Fix the typo in src/main.ts"
-
-# Run shell commands
-ant --allow-bash "Run tests and summarize failures"
-
-# Search web and fetch reference documentation
-ant "Find the latest release notes for Bun and summarize them"
+# Let ant inspect and fix your code
+ant --allow-edit "Fix the failing tests in src/auth.ts"
 ```
 
-### 2. Multi-Turn Sessions & Resuming
+---
+
+## 💡 Daily Workflows & Examples
+
+### 🔍 Codebase Inspection
 ```bash
-# Turn 1
-ant --allow-read "Inspect package.json and list direct dependencies"
-
-# Turn 2: Continues previous thread in the current working directory
-ant --continue "Which of these are outdated?"
-
-# Resume a specific thread by ID
-ant --resume <thread_id> "What was the last change we discussed?"
-
-# Manage threads
-ant threads list
-ant threads show <id> --messages
-ant threads rename <id> "Refactor task"
-ant threads delete <id> -y
+ant --allow-read "Find all endpoints in this project and check for missing error handling"
 ```
 
-### 3. Checkpoints & Workspace Rewind
+### 🛠️ Surgical Edits & Refactoring
 ```bash
-# Inspect checkpoints created by file operations
+ant --allow-edit "Migrate all imports in src/ from CommonJS to ES modules"
+```
+
+### 💻 Autonomous Shell Runs & Testing
+```bash
+ant --allow-bash "Run test suite, find why tests failed, and give me a summary"
+```
+
+### 🔄 Multi-turn Conversations
+```bash
+# Start a task
+ant --allow-read "Inspect package.json and list outdated dependencies"
+
+# Follow up in the same thread
+ant --continue "Which of these have breaking major version changes?"
+
+# Resume a specific thread later
+ant --resume <thread_id> "Let's proceed with upgrading the first package"
+```
+
+### ⏪ Instant Undo with Checkpoints
+Every edit is backed up automatically:
+```bash
+# View recent changes made by ant
 ant checkpoints list
 
-# Preview rewinding to before checkpoint #2
-ant checkpoints restore 2 --dry-run
+# Preview rollback
+ant checkpoints restore 1 --dry-run
 
-# Restore workspace files to before checkpoint #2
-ant checkpoints restore 2
+# Restore files to before the change
+ant checkpoints restore 1
 ```
 
 ---
 
-## Headless & Pipeline Integration
+## ⚙️ Configuration
 
-`ant` is purpose-built for Unix pipes, scripts, subagents, and CI runners:
-- Diagnostics, warnings, and tool status stream to `stderr`.
-- Result text or structured machine data emits cleanly to `stdout`.
+Settings are saved in `~/.ant/settings.json` and can be managed with `ant config`:
 
-### Single JSON Output (`-o json`)
-Emits a single-line JSON envelope upon completion:
 ```bash
-ant -p "Summarize package.json" --allow-read -o json | jq '.status, .text'
+ant config get                       # View current configuration
+ant config set model <provider/id>   # Set default model
+ant config set allow.read true       # Enable read permission by default
+ant config set allow.bash true       # Enable bash permission by default
+ant config set effort medium         # Set reasoning effort (low, medium, high)
+ant config set timeout 10m           # Set default task timeout
 ```
 
-### Streaming NDJSON Events (`-o stream-json`)
-Streams one JSON event per line as execution progresses:
-```bash
-ant -p "Run tests" --allow-bash -o stream-json
-```
-
-Event lifecycle:
-1. `init`: Emitted immediately with session ID, model, cwd, and active capabilities.
-2. `text`: Delta chunks for generated text.
-3. `tool_call`: When a tool is invoked (inputs > 64 KiB truncated).
-4. `tool_result`: Tool execution outcome, duration, and output.
-5. `step`: Step completion metadata and token usage.
-6. `result`: Exactly one terminal envelope containing exit code, final status, total steps, and usage.
+**Precedence:** CLI flags > Environment variables > Saved settings.
 
 ---
 
-## CLI Options
+## 🔌 Headless & Scripting (CI/CD)
+
+Integrate `ant` into your shell scripts, editors, or CI pipelines:
+
+```bash
+# Single JSON result to stdout
+ant -p "Summarize git diff" --allow-read -o json | jq -r '.text'
+
+# Real-time event stream (NDJSON)
+ant -p "Build project" --allow-bash -o stream-json
+```
+
+---
+
+## 📖 CLI Reference
 
 | Flag | Description |
 |---|---|
-| `-p, --prompt <text>` | Instruction prompt for the agent |
-| `-m, --model <id>` | Language model (`provider/model-id`) |
-| `-e, --effort <level>` | Reasoning effort (`provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) |
-| `-c, --continue` | Continue the latest thread in current directory |
-| `-r, --resume <id>` | Resume a specific thread by ID or prefix |
-| `--allow-read` | Grant `fs.read` capability |
-| `--allow-edit` | Grant `fs.read` and `fs.write` capabilities |
-| `--allow-bash` | Grant `shell.run` capability |
-| `--allow-destructive-bash` | Grant `shell.destructive` capability (skips prompts) |
-| `-t, --timeout <dur>` | Hard execution timeout (e.g. `30s`, `10m`) |
+| `-p, --prompt <text>` | Instruction prompt (or pass as argument / pipe via stdin) |
+| `-m, --model <id>` | Target model (`google/...`, `anthropic/...`, `openrouter/...`) |
+| `-e, --effort <level>` | Reasoning effort (`none`, `low`, `medium`, `high`, `max`) |
+| `--allow-read` | Allow reading files and directories |
+| `--allow-edit` | Allow editing and writing files |
+| `--allow-bash` | Allow running safe shell commands |
+| `--allow-destructive-bash` | Allow destructive shell commands |
+| `-c, --continue` | Continue the latest session in the current directory |
+| `-r, --resume <id>` | Resume a specific session by thread ID |
+| `-o, --output <format>` | Output format: `text`, `md`, `json`, `stream-json` |
+| `-t, --timeout <dur>` | Execution timeout (e.g. `30s`, `10m`) |
 | `-s, --max-steps <num>` | Maximum tool execution steps (default: 30) |
-| `-o, --output <format>` | Output format (`text`, `md`, `json`, `stream-json`) |
-| `-l, --log-level <level>` | Log verbosity (`error`, `info`, `debug`) |
-| `--theme <theme>` | Terminal theme (`auto`, `dark`, `light`, `ansi`) |
 
 ---
 
-## Exit Codes
+## 📄 License
 
-| Code | Status | Meaning |
-|---|---|---|
-| `0` | `completed` | Run finished successfully |
-| `1` | `max_steps` / `truncated` / `empty_response` | Model hit step cap, length cap, or empty response |
-| `2` | `usage_error` | Invalid arguments or configuration error |
-| `3` | `model_error` | Provider API error after retries |
-| `4` | `timeout` | Wall-clock execution timeout reached |
-| `5` | `internal_error` | Unexpected internal failure |
-| `129` | `cancelled` | Terminal disconnect or hangup (SIGHUP) |
-| `130` | `cancelled` | Interrupted by user signal (SIGINT / Ctrl-C) |
-| `143` | `cancelled` | Terminated by system signal (SIGTERM) |
-
----
-
-## Security Model & Guidelines
-
-1. **Bash Classifier:** Command tokens are verified against an AST allowlist. Mutating or ambiguous operations require explicit capabilities (`--allow-destructive-bash`). Prompt injections can still run allowed commands; do not grant shell access on untrusted repositories.
-2. **File Mutation Checkpoints:** Content snapshots protect against unintended edits via `WriteFile`, `EditFile`, and `DeleteFile`. Modifications made directly by shell commands or external tools are detected as conflicts during restoration.
-3. **Subprocess Scoping:** Background tasks launched via `TaskManager` terminate cleanly with `ant` during graceful teardown or emergency signals.
-4. **Secrets Protection:** Sensitive files (`.env`, `*.pem`, `id_rsa`, `.ssh/*`) are denied by file tools. Tool results are recorded locally in `$ANT_HOME/ant.db` (file mode `0600`).
-5. **Supported OS:** Supported on Linux and macOS. Windows is not supported.
+MIT
