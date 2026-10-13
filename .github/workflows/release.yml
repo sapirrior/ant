@@ -1,0 +1,177 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Verify & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun test
+
+  build-and-release:
+    name: Build & Release
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Build standalone binaries and JS bundle
+        run: |
+          mkdir -p dist
+
+          echo "Building standalone binaries..."
+          bun build --compile --no-env-file --target=bun-linux-x64 src/main.ts --outfile=dist/ant-linux-x64
+          bun build --compile --no-env-file --target=bun-linux-arm64 src/main.ts --outfile=dist/ant-linux-arm64
+          bun build --compile --no-env-file --target=bun-darwin-x64 src/main.ts --outfile=dist/ant-darwin-x64
+          bun build --compile --no-env-file --target=bun-darwin-arm64 src/main.ts --outfile=dist/ant-darwin-arm64
+          bun build --compile --no-env-file --target=bun-windows-x64 src/main.ts --outfile=dist/ant-windows-x64.exe
+
+          echo "Building bundled executable ant.js..."
+          bun build --target=bun src/main.ts --outfile=dist/ant.js
+          chmod +x dist/ant.js
+
+          echo "Generating SHA-256 checksums..."
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Generate AI Release Notes with ant
+        env:
+          GEMINI_API_KEY: ${{ secrets.ANT_API_KEY }}
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || echo "")
+
+          echo "Current Tag: $TAG_NAME"
+          echo "Previous Tag: ${PREV_TAG:-<initial release>}"
+
+          # Extract commit list
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log --oneline --no-merges "${PREV_TAG}..${TAG_NAME}")
+            DIFF_STAT=$(git diff --stat "${PREV_TAG}..${TAG_NAME}")
+            RAW_DIFF=$(git diff "${PREV_TAG}..${TAG_NAME}")
+          else
+            COMMITS=$(git log --oneline --no-merges -n 50 "${TAG_NAME}")
+            DIFF_STAT=$(git diff --stat "${TAG_NAME}~1..${TAG_NAME}" 2>/dev/null || echo "")
+            RAW_DIFF=$(git diff "${TAG_NAME}~1..${TAG_NAME}" 2>/dev/null || echo "")
+          fi
+
+          # Truncate raw diff if too large (capped at ~35,000 characters)
+          MAX_DIFF_CHARS=35000
+          if [ ${#RAW_DIFF} -gt $MAX_DIFF_CHARS ]; then
+            TRUNCATED_DIFF="${RAW_DIFF:0:$MAX_DIFF_CHARS}"
+            DIFF_CONTENT="$TRUNCATED_DIFF"$'\n\n[... Note: Remaining diff truncated to prevent context overflow ...]'
+          else
+            DIFF_CONTENT="$RAW_DIFF"
+          fi
+
+          # Prepare instruction prompt for ant
+          PROMPT_FILE=$(mktemp)
+          cat << 'EOF' > "$PROMPT_FILE"
+          You are an expert developer-advocate and release engineer writing GitHub Release Notes for `ant` (a daily-use autonomous developer AI CLI).
+
+          Your task: Analyze the provided git commits, diff stats, and code diff to produce authoritative, high-signal, developer-friendly Release Notes in GitHub Flavored Markdown.
+
+          Structure and formatting guidelines:
+          1. **Executive Summary**: 1–2 punchy sentences capturing the core theme, major milestones, or purpose of this release.
+          2. **🚨 Breaking Changes (if applicable)**: Explicitly call out any breaking behavior, changed CLI arguments, or deprecated configurations. If none, omit this section entirely.
+          3. **🚀 Highlights & New Features**: Categorize distinct capabilities added in this release. Explain *why* it matters to a developer, not just what lines changed.
+          4. **🛠️ Bug Fixes & Improvements**: Bulleted list of stability, security, or performance fixes.
+          5. **📝 Commits**: Format the raw commit list cleanly under a collapsible `<details><summary>View full commit log</summary>...</details>` block.
+          6. **📦 Artifacts & Quickstart**: A tiny 2-line snippet showing how to run the binary (e.g. `chmod +x ant-linux-x64 && ./ant-linux-x64`) or bundled script (`bun run ant.js`).
+
+          Tone & Rules:
+          - Direct, polished, and developer-centric. Avoid corporate fluff or generic buzzwords.
+          - Never repeat the same change across multiple categories.
+          - Strictly output valid markdown. Do not prefix or suffix with meta-commentary like "Here are your release notes:".
+          EOF
+
+          CONTEXT_FILE=$(mktemp)
+          cat << EOF > "$CONTEXT_FILE"
+          Tag: $TAG_NAME
+          Previous Tag: ${PREV_TAG:-None (Initial Release)}
+
+          ### Commits:
+          $COMMITS
+
+          ### Diff Stat:
+          $DIFF_STAT
+
+          ### Diff (Truncated if large):
+          $DIFF_CONTENT
+          EOF
+
+          AI_INPUT="$(cat $PROMPT_FILE)
+
+          Context:
+          $(cat $CONTEXT_FILE)"
+
+          # Run ant using google/gemini-2.5-flash with fallback
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "Invoking ant with google/gemini-2.5-flash to generate release notes..."
+            if bun run src/main.ts -m "google/gemini-2.5-flash" -p "$AI_INPUT" -o text > release_notes.md 2>stderr.log; then
+              echo "AI release notes generated successfully."
+            else
+              echo "Warning: ant failed to generate release notes. Check stderr:"
+              cat stderr.log
+              echo "Falling back to git commit log..."
+              {
+                echo "## Release $TAG_NAME"
+                echo ""
+                echo "### Commits"
+                echo "$COMMITS"
+              } > release_notes.md
+            fi
+          else
+            echo "ANT_API_KEY / GEMINI_API_KEY secret not found. Using fallback git release notes."
+            {
+              echo "## Release $TAG_NAME"
+              echo ""
+              echo "### Commits"
+              echo "$COMMITS"
+            } > release_notes.md
+          fi
+
+          rm -f "$PROMPT_FILE" "$CONTEXT_FILE" stderr.log
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: |
+            dist/*
+          draft: false
+          prerelease: false

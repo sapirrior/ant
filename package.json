@@ -16,8 +16,14 @@
     "dev": "bun --no-env-file --watch run src/main.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "bundle": "bun build --target=bun src/main.ts --outfile=dist/ant.js && chmod +x dist/ant.js",
     "build": "bun build --compile --no-env-file src/main.ts --outfile=ant",
-    "build:linux-arm64": "bun build --compile --no-env-file --target=bun-linux-arm64 src/main.ts --outfile=ant"
+    "build:linux-x64": "bun build --compile --no-env-file --target=bun-linux-x64 src/main.ts --outfile=dist/ant-linux-x64",
+    "build:linux-arm64": "bun build --compile --no-env-file --target=bun-linux-arm64 src/main.ts --outfile=dist/ant-linux-arm64",
+    "build:darwin-x64": "bun build --compile --no-env-file --target=bun-darwin-x64 src/main.ts --outfile=dist/ant-darwin-x64",
+    "build:darwin-arm64": "bun build --compile --no-env-file --target=bun-darwin-arm64 src/main.ts --outfile=dist/ant-darwin-arm64",
+    "build:windows-x64": "bun build --compile --no-env-file --target=bun-windows-x64 src/main.ts --outfile=dist/ant-windows-x64.exe",
+    "build:all": "bun run bundle && bun run build:linux-x64 && bun run build:linux-arm64 && bun run build:darwin-x64 && bun run build:darwin-arm64 && bun run build:windows-x64"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.78",
