@@ -10,7 +10,7 @@ export function createProgram(): Command {
   program
     .name('ant')
     .description('A daily-use, streaming, model-agnostic AI agent CLI')
-    .version('0.1.0')
+    .version('0.1.1')
     .exitOverride((err) => {
       // Keep help and version exit 0
       if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {

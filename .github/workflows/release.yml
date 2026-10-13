@@ -137,10 +137,10 @@ jobs:
           Context:
           $(cat $CONTEXT_FILE)"
 
-          # Run ant using google/gemini-2.5-flash with fallback
+          # Run ant using google/gemini-flash-lite-latest with fallback
           if [ -n "$GEMINI_API_KEY" ]; then
-            echo "Invoking ant with google/gemini-2.5-flash to generate release notes..."
-            if bun run src/main.ts -m "google/gemini-2.5-flash" -p "$AI_INPUT" -o text > release_notes.md 2>stderr.log; then
+            echo "Invoking ant with google/gemini-flash-lite-latest to generate release notes..."
+            if bun run src/main.ts -m "google/gemini-flash-lite-latest" -p "$AI_INPUT" -o text > release_notes.md 2>stderr.log; then
               echo "AI release notes generated successfully."
             else
               echo "Warning: ant failed to generate release notes. Check stderr:"
