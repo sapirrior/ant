@@ -38,4 +38,27 @@ describe('model registry', () => {
   it('throws when custom base URL is missing', () => {
     expect(() => resolveLanguageModel('custom/my-model', {})).toThrow(/ANT_CUSTOM_BASE_URL/)
   })
+
+  it('throws when OpenAI key is missing', () => {
+    expect(() => resolveLanguageModel('openai/gpt-4o', {})).toThrow(/OPENAI_API_KEY/)
+  })
+
+  it('throws when Groq key is missing', () => {
+    expect(() => resolveLanguageModel('groq/llama-3.3-70b-versatile', {})).toThrow(/GROQ_API_KEY/)
+  })
+
+  it('throws when xAI key is missing', () => {
+    expect(() => resolveLanguageModel('xai/grok-2-1212', {})).toThrow(/XAI_API_KEY/)
+  })
+
+  it('throws when DeepSeek key is missing', () => {
+    expect(() => resolveLanguageModel('deepseek/deepseek-chat', {})).toThrow(/DEEPSEEK_API_KEY/)
+  })
+
+  it('resolves Ollama without API key', () => {
+    const res = resolveLanguageModel('ollama/llama3', {})
+    expect(res.provider).toBe('ollama')
+    expect(res.modelId).toBe('llama3')
+    expect(res.model).toBeDefined()
+  })
 })

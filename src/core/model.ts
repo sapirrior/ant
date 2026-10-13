@@ -43,6 +43,49 @@ export const PROVIDERS: Record<string, ProviderSpec> = {
       }
     },
   },
+  openai: {
+    name: 'openai',
+    env: ['OPENAI_API_KEY'],
+    validateAuth(env) {
+      if (!env.OPENAI_API_KEY) {
+        throw new Error('Missing environment variable OPENAI_API_KEY for provider "openai".')
+      }
+    },
+  },
+  groq: {
+    name: 'groq',
+    env: ['GROQ_API_KEY'],
+    validateAuth(env) {
+      if (!env.GROQ_API_KEY) {
+        throw new Error('Missing environment variable GROQ_API_KEY for provider "groq".')
+      }
+    },
+  },
+  xai: {
+    name: 'xai',
+    env: ['XAI_API_KEY'],
+    validateAuth(env) {
+      if (!env.XAI_API_KEY) {
+        throw new Error('Missing environment variable XAI_API_KEY for provider "xai".')
+      }
+    },
+  },
+  deepseek: {
+    name: 'deepseek',
+    env: ['DEEPSEEK_API_KEY'],
+    validateAuth(env) {
+      if (!env.DEEPSEEK_API_KEY) {
+        throw new Error('Missing environment variable DEEPSEEK_API_KEY for provider "deepseek".')
+      }
+    },
+  },
+  ollama: {
+    name: 'ollama',
+    env: ['OLLAMA_BASE_URL'],
+    validateAuth() {
+      // Local ollama requires no API key by default
+    },
+  },
   custom: {
     name: 'custom',
     env: ['ANT_CUSTOM_BASE_URL'],
@@ -71,7 +114,8 @@ export function resolveLanguageModel(rawModel: string, env: NodeJS.ProcessEnv = 
   const spec = PROVIDERS[provider]
 
   if (!spec) {
-    throw new Error(`Unsupported provider "${provider}". Supported: anthropic, google, openrouter, custom. Format: "provider/model-id"`)
+    const supportedList = Object.keys(PROVIDERS).join(', ')
+    throw new Error(`Unsupported provider "${provider}". Supported: ${supportedList}. Format: "provider/model-id"`)
   }
 
   spec.validateAuth(env)
@@ -99,6 +143,61 @@ export function resolveLanguageModel(rawModel: string, env: NodeJS.ProcessEnv = 
         baseURL: 'https://openrouter.ai/api/v1',
       })
       const model = openrouter(modelId)
+      return { provider, modelId, model }
+    }
+
+    case 'openai': {
+      const apiKey = env.OPENAI_API_KEY!
+      const openai = createOpenAICompatible({
+        name: 'openai',
+        apiKey,
+        baseURL: env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+      })
+      const model = openai(modelId)
+      return { provider, modelId, model }
+    }
+
+    case 'groq': {
+      const apiKey = env.GROQ_API_KEY!
+      const groq = createOpenAICompatible({
+        name: 'groq',
+        apiKey,
+        baseURL: 'https://api.groq.com/openai/v1',
+      })
+      const model = groq(modelId)
+      return { provider, modelId, model }
+    }
+
+    case 'xai': {
+      const apiKey = env.XAI_API_KEY!
+      const xai = createOpenAICompatible({
+        name: 'xai',
+        apiKey,
+        baseURL: 'https://api.x.ai/v1',
+      })
+      const model = xai(modelId)
+      return { provider, modelId, model }
+    }
+
+    case 'deepseek': {
+      const apiKey = env.DEEPSEEK_API_KEY!
+      const deepseek = createOpenAICompatible({
+        name: 'deepseek',
+        apiKey,
+        baseURL: 'https://api.deepseek.com',
+      })
+      const model = deepseek(modelId)
+      return { provider, modelId, model }
+    }
+
+    case 'ollama': {
+      const baseURL = env.OLLAMA_BASE_URL || 'http://localhost:11434/v1'
+      const ollama = createOpenAICompatible({
+        name: 'ollama',
+        apiKey: env.OLLAMA_API_KEY || 'ollama',
+        baseURL,
+      })
+      const model = ollama(modelId)
       return { provider, modelId, model }
     }
 

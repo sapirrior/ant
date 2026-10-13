@@ -43,9 +43,28 @@ Set your API key and default model once:
 export GEMINI_API_KEY="your-api-key"
 ant config set model google/gemini-2.5-flash
 
-# Or Anthropic Claude
+# Anthropic Claude
 export ANTHROPIC_API_KEY="your-api-key"
 ant config set model anthropic/claude-3-7-sonnet-20250219
+
+# OpenAI
+export OPENAI_API_KEY="your-api-key"
+ant config set model openai/gpt-4o
+
+# Groq (Ultra-fast inference)
+export GROQ_API_KEY="your-api-key"
+ant config set model groq/llama-3.3-70b-versatile
+
+# xAI Grok
+export XAI_API_KEY="your-api-key"
+ant config set model xai/grok-2-1212
+
+# DeepSeek
+export DEEPSEEK_API_KEY="your-api-key"
+ant config set model deepseek/deepseek-chat
+
+# Ollama (Local, offline, zero API key)
+ant config set model ollama/llama3
 ```
 
 ### 3. Run Your First Command
