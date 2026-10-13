@@ -129,6 +129,15 @@ ant -p "Summarize git diff" --allow-read -o json | jq -r '.text'
 ant -p "Build project" --allow-bash -o stream-json
 ```
 
+### 🐜 Dogfooding: `ant` Releases `ant`
+
+We believe in using what we build. In our GitHub Actions release pipeline, `ant` runs autonomously to draft its own release notes:
+1. Whenever a version tag (e.g. `v0.1.1`) is pushed, CI cross-compiles all binaries and extracts the git diff.
+2. `ant` is called in headless mode with `google/gemini-flash-lite-latest` to read the commits and diff stats.
+3. `ant` synthesizes executive summaries, highlights, and categorized changelogs directly into GitHub Releases.
+
+Every release note you see on the [Releases page](https://github.com/sapirrior/ant/releases) was written by `ant` itself! 🚀
+
 ---
 
 ## 📖 CLI Reference
