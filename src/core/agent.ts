@@ -154,6 +154,7 @@ export function describeModelError(err: unknown, modelProvider?: string): string
 
 export interface RunAgentContext {
   tasks?: TaskManagerRegistry
+  mcpManager?: import('../mcp/manager.ts').McpClientManager
   onStepPersist?: (messages: ModelMessage[], usage?: UsageSummary) => void
 }
 
@@ -164,8 +165,18 @@ export async function runAgent(
   const { model, provider, adapter } = resolveLanguageModel(config.model)
   const readState = new Map<string, string>()
   const tasks = agentContext?.tasks ?? new TaskManagerRegistry()
+  const mcpManager = agentContext?.mcpManager
 
   const bashSettings = config.settings?.tools?.Bash
+  const allowedMcpPatterns = [
+    ...(config.allowedMcp ?? []),
+    ...(config.settings?.allow?.mcp ?? []),
+  ]
+  const deniedMcpPatterns = [
+    ...(config.deniedMcp ?? []),
+    ...(config.settings?.deny?.mcp ?? []),
+  ]
+
   const toolContext: ToolExecutionContext = {
     cwd: config.cwd,
     grants: config.grants,
@@ -173,6 +184,9 @@ export async function runAgent(
     readState,
     threadId,
     tasks,
+    mcpManager,
+    allowedMcpPatterns,
+    deniedMcpPatterns,
     backgroundEnabled: true,
     foregroundMs: bashSettings?.foregroundMs,
     passEnv: bashSettings?.passEnv,

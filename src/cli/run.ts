@@ -17,7 +17,8 @@ export function registerRunCommand(program: Command): void {
     .option('--allow-bash', 'Grant capability to run shell commands (shell.run)')
     .option('--no-allow-bash', 'Deny capability to run shell commands')
     .option('--allow-destructive-bash', 'Grant capability to run destructive shell commands (shell.destructive)')
-    .option('--no-allow-destructive-bash', 'Deny capability to run destructive shell commands')
+    .option('--allow-mcp <patterns...>', 'Pre-authorize MCP tool calls (e.g. "github/*", "db/query", or "*")')
+    .option('--deny-mcp <patterns...>', 'Explicitly deny MCP tool calls (e.g. "github/*", "db/query", or "*")')
     .option('-m, --model <provider/model-id>', 'Model to use (format: provider/model-id)')
     .option('-s, --max-steps <number>', 'Maximum tool execution steps')
     .option('-t, --timeout <duration>', 'Wall-clock timeout e.g. "30m", "10s"')
@@ -126,6 +127,20 @@ export function registerRunCommand(program: Command): void {
           allowDestructiveBash,
         })
 
+        const allowedMcp = Array.isArray(options.allowMcp)
+          ? (options.allowMcp as string[])
+          : typeof options.allowMcp === 'string'
+          ? [options.allowMcp]
+          : undefined
+
+        const deniedMcp = Array.isArray(options.denyMcp)
+          ? (options.denyMcp as string[])
+          : typeof options.denyMcp === 'string'
+          ? [options.denyMcp]
+          : options.denyMcp === true
+          ? ['*']
+          : undefined
+
         const config: Config = {
           prompt,
           stdinInput,
@@ -141,6 +156,8 @@ export function registerRunCommand(program: Command): void {
           cwd: process.cwd(),
           continueLatest: Boolean(options.continue),
           resumeThreadId: options.resume,
+          allowedMcp,
+          deniedMcp,
           settings: userSettings,
         }
 

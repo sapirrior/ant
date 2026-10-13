@@ -27,6 +27,10 @@ export interface Settings {
     edit?: boolean
     bash?: boolean
     destructiveBash?: boolean
+    mcp?: string[]
+  }
+  deny?: {
+    mcp?: string[]
   }
   tools?: Record<string, ToolSettings>
 }
@@ -44,6 +48,10 @@ export const DEFAULT_SETTINGS: Settings = {
     edit: false,
     bash: false,
     destructiveBash: false,
+    mcp: [],
+  },
+  deny: {
+    mcp: [],
   },
   tools: {
     ReadFile: { enabled: true },
@@ -56,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
     TaskManager: { enabled: true },
     WebSearch: { enabled: true },
     WebFetch: { enabled: true },
+    McpTool: { enabled: true },
   },
 }
 
@@ -450,6 +459,44 @@ export const KEYS: Record<string, KeyDefinition> = {
     },
     unset: (s) => {
       if (s.allow) delete s.allow.destructiveBash
+    },
+  },
+  'allow.mcp': {
+    key: 'allow.mcp',
+    describe: 'Pre-allowed MCP tools list/patterns (comma-separated or JSON array)',
+    parse: (v) => {
+      const trimmed = v.trim()
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        return JSON.parse(trimmed)
+      }
+      return trimmed.split(',').map((x) => x.trim()).filter(Boolean)
+    },
+    get: (s) => s.allow?.mcp,
+    set: (s, v) => {
+      s.allow = s.allow ?? {}
+      s.allow.mcp = v as string[]
+    },
+    unset: (s) => {
+      if (s.allow) delete s.allow.mcp
+    },
+  },
+  'deny.mcp': {
+    key: 'deny.mcp',
+    describe: 'Denied MCP tools list/patterns (comma-separated or JSON array)',
+    parse: (v) => {
+      const trimmed = v.trim()
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        return JSON.parse(trimmed)
+      }
+      return trimmed.split(',').map((x) => x.trim()).filter(Boolean)
+    },
+    get: (s) => s.deny?.mcp,
+    set: (s, v) => {
+      s.deny = s.deny ?? {}
+      s.deny.mcp = v as string[]
+    },
+    unset: (s) => {
+      if (s.deny) delete s.deny.mcp
     },
   },
   'tools.Bash.foregroundMs': {

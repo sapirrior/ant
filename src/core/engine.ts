@@ -36,6 +36,7 @@ export class Engine {
     const lifecycle = createLifecycle()
     const startTime = Date.now()
     const tasks = new TaskManagerRegistry()
+    const mcpManager = new (await import('../mcp/manager.ts')).McpClientManager({ cwd: config.cwd })
     const createdCheckpoints: number[] = []
 
     // Clamp timeout to 32-bit positive integer (Plan §2.2 / I9)
@@ -55,6 +56,7 @@ export class Engine {
     // Register emergency cleanups for immediate termination signals
     lifecycle.onEmergencyCleanup(() => {
       tasks.killAll()
+      mcpManager.killAll()
       if (db && activeThreadId) {
         try {
           releaseLease(db, activeThreadId)
@@ -268,6 +270,7 @@ export class Engine {
         threadId: thread.id,
         agentContext: {
           tasks,
+          mcpManager,
           onStepPersist: (stepMessages: ModelMessage[], usage?: UsageSummary) => {
             // Atomic step message and usage persistence (Plan §2.5 / I1)
             recordStepMessages(db!, thread.id, stepMessages, 1, usage)
@@ -286,7 +289,11 @@ export class Engine {
               let summary: string | undefined
               if (typeof event.input === 'object' && event.input !== null) {
                 const obj = event.input as Record<string, unknown>
-                if (typeof obj.path === 'string') summary = obj.path
+                if (event.toolName === 'McpTool') {
+                  if (obj.action === 'list_servers') summary = 'list_servers'
+                  else if (obj.action === 'list_tools') summary = `list_tools (${obj.server})`
+                  else if (obj.action === 'call') summary = `call ${obj.server}/${obj.tool}`
+                } else if (typeof obj.path === 'string') summary = obj.path
                 else if (typeof obj.command === 'string') summary = `"${obj.command.slice(0, 50)}"`
                 else if (typeof obj.query === 'string') summary = `"${obj.query.slice(0, 50)}"`
                 else if (typeof obj.url === 'string') summary = obj.url.slice(0, 50)
@@ -365,6 +372,11 @@ export class Engine {
         await tasks.shutdown(2000)
       } catch {
         tasks.killAll()
+      }
+      try {
+        await mcpManager.closeAll()
+      } catch {
+        mcpManager.killAll()
       }
       if (db && activeThreadId) {
         try {

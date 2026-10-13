@@ -13,6 +13,7 @@
 * 🔒 **Safe Shell Execution** — Allowlist-based command analyzer prevents accidental or rogue destructive commands.
 * 🔄 **Multi-turn Context & Resumable Sessions** — Continue conversations right where you left off in any repository.
 * 🌐 **Built-in Search & Web Fetch** — Search the web and read documentation directly within the agent loop.
+* 🔌 **Model Context Protocol (MCP)** — Seamlessly connect stdio or HTTP/SSE servers globally (`~/.ant/mcp.json`) or per project (`.ant/mcp.json`).
 * 🤖 **Pipe & Automation Friendly** — Clean `stdout` for pipes and scripts (`-o json` or `-o stream-json`), with rich diagnostics sent to `stderr`.
 
 ---
@@ -135,6 +136,33 @@ ant checkpoints restore 1 --dry-run
 ant checkpoints restore 1
 ```
 
+### 🔌 Model Context Protocol (MCP)
+Extend `ant` with external tools via MCP:
+
+```bash
+# Add a local stdio MCP server (e.g., SQLite, Git, Filesystem)
+ant mcp add git --command "mcp-server-git" --args "--repository" "."
+
+# Add a remote HTTP/SSE MCP server
+ant mcp add browserless --url "https://mcp.browserless.io/mcp" --header "Authorization=Bearer <token>"
+
+# Add to global config (~/.ant/mcp.json) instead of project
+ant mcp add my-tool --command "npx" --args "-y" "my-mcp-tool" --global
+
+# List configured servers across project and global scopes
+ant mcp list
+
+# Enable or disable servers without deleting them
+ant mcp disable git
+ant mcp enable git
+
+# Pre-authorize MCP tools during run (or use interactive confirmation)
+ant "Analyze git log" --allow-mcp "git/*"
+
+# Explicitly deny specific MCP tools during run
+ant "Analyze repo" --deny-mcp "git/delete_repo"
+```
+
 ---
 
 ## ⚙️ Configuration
@@ -147,6 +175,8 @@ ant config get model                 # Get specific configuration value
 ant config set model <provider/id>   # Set default model
 ant config set allow.read true       # Enable read permission by default
 ant config set allow.bash true       # Enable bash permission by default
+ant config set allow.mcp "git/*"     # Pre-authorize MCP tools by default
+ant config set deny.mcp "git/delete" # Deny specific MCP tools by default
 ant config set effort medium         # Set reasoning effort (low, medium, high)
 ant config set timeout 10m           # Set default task timeout
 ```
@@ -189,6 +219,8 @@ Every release note you see on the [Releases page](https://github.com/sapirrior/a
 | `--allow-edit` | Allow editing and writing files |
 | `--allow-bash` | Allow running safe shell commands |
 | `--allow-destructive-bash` | Allow destructive shell commands |
+| `--allow-mcp <patterns...>` | Pre-authorize MCP tools (e.g. `github/*`, `db/query`, or `*`) |
+| `--deny-mcp <patterns...>` | Explicitly deny MCP tools during execution |
 | `-c, --continue` | Continue the latest session in the current directory |
 | `-r, --resume <id>` | Resume a specific session by thread ID |
 | `-o, --output <format>` | Output format: `text`, `md`, `json`, `stream-json` |

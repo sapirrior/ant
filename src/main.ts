@@ -6,6 +6,7 @@ import { registerRunCommand } from './cli/run.ts'
 import { registerThreadsCommand } from './cli/threads.ts'
 import { registerCheckpointsCommand } from './cli/checkpoints.ts'
 import { registerUpdateCommand } from './cli/update.ts'
+import { registerMcpCommand } from './cli/mcp.ts'
 
 export function createProgram(): Command {
   const program = new Command()
@@ -35,6 +36,7 @@ export function createProgram(): Command {
   registerThreadsCommand(program)
   registerCheckpointsCommand(program)
   registerUpdateCommand(program)
+  registerMcpCommand(program)
   registerRunCommand(program)
 
   return program

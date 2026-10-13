@@ -11,6 +11,7 @@ import { createWriteFileTool } from './WriteFileTool/WriteFileTool.ts'
 import { createTaskManagerTool } from './TaskManagerTool/TaskManagerTool.ts'
 import { createWebSearchTool } from './WebSearchTool/WebSearchTool.ts'
 import { createWebFetchTool } from './WebFetchTool/WebFetchTool.ts'
+import { createMcpTool } from './McpTool/McpTool.ts'
 
 export interface ToolDef {
   name: ToolName
@@ -54,6 +55,11 @@ export function buildTools(context: ToolExecutionContext, settings?: Settings): 
   }
   if (isEnabled('WebFetch')) {
     tools.WebFetch = createWebFetchTool(context)
+  }
+
+  // MCP meta-tool
+  if (isEnabled('McpTool')) {
+    tools.McpTool = createMcpTool(context)
   }
 
   return tools

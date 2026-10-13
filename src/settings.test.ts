@@ -121,4 +121,25 @@ describe('settings module', () => {
     expect(warnings.length).toBe(1)
     expect(warnings[0]).toContain('invalidRandomKey')
   })
+
+  it('correctly sets, gets, and unsets allow.mcp and deny.mcp in KEYS table', () => {
+    const s: Settings = {}
+    KEYS['allow.mcp']!.set(s, ['git/*', 'db/query'])
+    expect(s.allow?.mcp).toEqual(['git/*', 'db/query'])
+    expect(KEYS['allow.mcp']!.get(s)).toEqual(['git/*', 'db/query'])
+
+    KEYS['allow.mcp']!.unset(s)
+    expect(s.allow?.mcp).toBeUndefined()
+
+    KEYS['deny.mcp']!.set(s, ['git/delete_repo'])
+    expect(s.deny?.mcp).toEqual(['git/delete_repo'])
+    expect(KEYS['deny.mcp']!.get(s)).toEqual(['git/delete_repo'])
+
+    KEYS['deny.mcp']!.unset(s)
+    expect(s.deny?.mcp).toBeUndefined()
+
+    // Test parser for comma-separated and JSON string
+    expect(KEYS['allow.mcp']!.parse('server/a, server/b')).toEqual(['server/a', 'server/b'])
+    expect(KEYS['deny.mcp']!.parse('["server/x", "server/y"]')).toEqual(['server/x', 'server/y'])
+  })
 })
