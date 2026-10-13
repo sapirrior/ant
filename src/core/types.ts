@@ -63,6 +63,7 @@ export interface UsageSummary {
   readonly inputTokens?: number
   readonly outputTokens?: number
   readonly totalTokens?: number
+  readonly cachedTokens?: number
 }
 
 export type RunEvent =

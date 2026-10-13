@@ -36,22 +36,22 @@ bun run build
 
 ### 2. Configure Your Model
 
-Set your API key and default model once:
+`ant` features a modular provider adapter architecture powered by the Vercel AI SDK. Set your API key and default model once:
 
 ```bash
-# Google Gemini
+# Google Gemini (with developer-grade safety thresholds)
 export GEMINI_API_KEY="your-api-key"
 ant config set model google/gemini-2.5-flash
 
-# Anthropic Claude
+# Anthropic Claude (with automatic ephemeral prompt caching)
 export ANTHROPIC_API_KEY="your-api-key"
 ant config set model anthropic/claude-3-7-sonnet-20250219
 
-# OpenAI
+# OpenAI (with automatic server-side prefix caching)
 export OPENAI_API_KEY="your-api-key"
 ant config set model openai/gpt-4o
 
-# Groq (Ultra-fast inference)
+# Groq (Ultra-fast LPU inference)
 export GROQ_API_KEY="your-api-key"
 ant config set model groq/llama-3.3-70b-versatile
 
@@ -59,13 +59,27 @@ ant config set model groq/llama-3.3-70b-versatile
 export XAI_API_KEY="your-api-key"
 ant config set model xai/grok-2-1212
 
-# DeepSeek
+# DeepSeek (Reasoner & automatic context caching)
 export DEEPSEEK_API_KEY="your-api-key"
 ant config set model deepseek/deepseek-chat
 
-# Ollama (Local, offline, zero API key)
+# OpenRouter (Multi-model gateway)
+export OPENROUTER_API_KEY="your-api-key"
+ant config set model openrouter/openrouter/free
+
+# Ollama (Local, offline, zero API key required by default)
 ant config set model ollama/llama3
+# Optional custom base URL & key: export OLLAMA_BASE_URL="http://192.168.1.50:11434/v1"
+
+# Custom OpenAI-Compatible Endpoints
+export ANT_CUSTOM_BASE_URL="http://localhost:8000/v1"
+ant config set model custom/my-model
 ```
+
+### ⚡ Built-in Provider Optimizations
+- **Anthropic Prompt Caching**: System instructions and conversation context automatically receive ephemeral cache breakpoints (`cacheControl: { type: 'ephemeral' }`), cutting input costs by up to 90% and slashing latency on multi-turn sessions.
+- **Google Developer Safety Settings**: Gemini models run with developer-tuned safety thresholds (`BLOCK_ONLY_HIGH`) to avoid false-positive refusals during codebase inspection, bash scripts, and regex audits.
+- **OpenAI & DeepSeek Prefix Caching**: Prompt structure and tool declarations maintain strict deterministic ordering for optimal server-side prefix cache hit rates.
 
 ### 3. Run Your First Command
 

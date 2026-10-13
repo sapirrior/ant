@@ -135,7 +135,7 @@ export async function runAgent(
   options: ModelRunOptions & { agentContext?: RunAgentContext }
 ): Promise<ModelOutcome> {
   const { config, messages, signal, threadId, onCheckpoint, onEvent, agentContext } = options
-  const { model, provider } = resolveLanguageModel(config.model)
+  const { model, provider, adapter } = resolveLanguageModel(config.model)
   const readState = new Map<string, string>()
   const tasks = agentContext?.tasks ?? new TaskManagerRegistry()
 
@@ -163,12 +163,15 @@ export async function runAgent(
   const toolCallStartTimes = new Map<string, number>()
   let streamError: unknown = null
 
+  const providerOptions = adapter.buildProviderOptions?.()
+
   try {
     const result = streamText({
       model,
       instructions,
       messages,
       tools,
+      providerOptions,
       reasoning: config.effort,
       stopWhen: isStepCount(config.maxSteps),
       abortSignal: signal,
@@ -187,11 +190,17 @@ export async function runAgent(
       },
       onStepEnd: (step) => {
         stepsExecuted++
+        const cachedTokens =
+          (step.usage as any)?.cachedPromptTokens ??
+          (step.usage as any)?.cacheReadInputTokens ??
+          undefined
+
         const stepUsage: UsageSummary | undefined = step.usage
           ? {
               inputTokens: step.usage.inputTokens,
               outputTokens: step.usage.outputTokens,
               totalTokens: step.usage.totalTokens,
+              cachedTokens,
             }
           : undefined
 
