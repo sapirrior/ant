@@ -1,5 +1,6 @@
 import {
   APICallError,
+  NoOutputGeneratedError,
   RetryError,
   StreamProviderError,
   isStepCount,
@@ -119,8 +120,33 @@ export function describeModelError(err: unknown, modelProvider?: string): string
     }
   }
 
+  if (
+    NoOutputGeneratedError.isInstance(target) ||
+    (target instanceof Error && /no output generated/i.test(target.message))
+  ) {
+    return 'model returned no output (check model parameters, reasoning effort, or compatibility)'
+  }
+
   if (target instanceof Error) {
     return target.message
+  }
+
+  if (target && typeof target === 'object') {
+    const obj = target as Record<string, unknown>
+    if (typeof obj.message === 'string') {
+      return obj.message
+    }
+    if (typeof obj.error === 'string') {
+      return obj.error
+    }
+    if (obj.error && typeof obj.error === 'object' && typeof (obj.error as any).message === 'string') {
+      return (obj.error as any).message
+    }
+    try {
+      return JSON.stringify(target)
+    } catch {
+      // fallback
+    }
   }
 
   return String(target)
@@ -320,7 +346,12 @@ export async function runAgent(
       return abortOutcome(signal, stepsExecuted)
     }
 
-    const describedError = describeModelError(error || streamError, provider)
+    const effectiveError =
+      streamError && (NoOutputGeneratedError.isInstance(error) || !error)
+        ? streamError
+        : error || streamError
+
+    const describedError = describeModelError(effectiveError, provider)
     return {
       status: 'model_error',
       exitCode: 3,

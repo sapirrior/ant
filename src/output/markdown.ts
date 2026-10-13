@@ -1,5 +1,5 @@
 import { marked, type Token, type Tokens } from 'marked'
-import { highlight, supportsLanguage } from 'cli-highlight'
+import { highlight, supportsLanguage, type Theme } from 'cli-highlight'
 import { createColorFormatter, type ColorLevel } from './color.ts'
 
 export interface MarkdownOptions {
@@ -8,6 +8,187 @@ export interface MarkdownOptions {
 }
 
 const EOL = '\n'
+
+const LANGUAGE_ALIASES: Record<string, string> = {
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  tsx: 'typescript',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  bash: 'bash',
+  py: 'python',
+  python3: 'python',
+  rb: 'ruby',
+  rs: 'rust',
+  yml: 'yaml',
+  yaml: 'yaml',
+  json: 'json',
+  golang: 'go',
+  go: 'go',
+  html: 'xml',
+  xml: 'xml',
+  css: 'css',
+  sql: 'sql',
+  md: 'markdown',
+  markdown: 'markdown',
+}
+
+export function resolveLanguage(rawLang?: string): string | undefined {
+  if (!rawLang) return undefined
+  const clean = rawLang.trim().split(/[\s:{]/)[0]?.toLowerCase()
+  if (!clean) return undefined
+  const aliased = LANGUAGE_ALIASES[clean] ?? clean
+  if (supportsLanguage(aliased)) {
+    return aliased
+  }
+  return undefined
+}
+
+export function createHighlightTheme(fmt: ReturnType<typeof createColorFormatter>): Theme {
+  if (fmt.level === 0) {
+    const plain = (s: string) => s
+    return {
+      default: plain,
+      keyword: plain,
+      built_in: plain,
+      type: plain,
+      literal: plain,
+      number: plain,
+      regexp: plain,
+      string: plain,
+      subst: plain,
+      symbol: plain,
+      class: plain,
+      function: plain,
+      title: plain,
+      params: plain,
+      comment: plain,
+      doctag: plain,
+      meta: plain,
+      'meta-keyword': plain,
+      'meta-string': plain,
+      section: plain,
+      tag: plain,
+      name: plain,
+      'builtin-name': plain,
+      attr: plain,
+      attribute: plain,
+      variable: plain,
+      bullet: plain,
+      code: plain,
+      emphasis: plain,
+      strong: plain,
+      formula: plain,
+      link: plain,
+      quote: plain,
+      'selector-tag': plain,
+      'selector-id': plain,
+      'selector-class': plain,
+      'selector-attr': plain,
+      'selector-pseudo': plain,
+      'template-tag': plain,
+      'template-variable': plain,
+      addition: plain,
+      deletion: plain,
+    }
+  }
+
+  return {
+    // Keywords, tags, and CSS selectors -> primary brand color
+    keyword: (s: string) => fmt.primary(s),
+    'selector-tag': (s: string) => fmt.primary(s),
+    tag: (s: string) => fmt.primary(s),
+    name: (s: string) => fmt.primary(s),
+
+    // Types, built-ins, classes, attributes -> secondary accent
+    built_in: (s: string) => fmt.secondary(s),
+    'builtin-name': (s: string) => fmt.secondary(s),
+    type: (s: string) => fmt.secondary(s),
+    class: (s: string) => fmt.secondary(s),
+    attr: (s: string) => fmt.secondary(s),
+    attribute: (s: string) => fmt.secondary(s),
+    'selector-attr': (s: string) => fmt.secondary(s),
+    'selector-class': (s: string) => fmt.secondary(s),
+    'selector-id': (s: string) => fmt.secondary(s),
+    'selector-pseudo': (s: string) => fmt.secondary(s),
+
+    // Strings, regexps, diff additions -> success (green)
+    string: (s: string) => fmt.success(s),
+    regexp: (s: string) => fmt.success(s),
+    'meta-string': (s: string) => fmt.success(s),
+    addition: (s: string) => fmt.success(s),
+
+    // Numbers, literals -> warning (amber)
+    number: (s: string) => fmt.warning(s),
+    literal: (s: string) => fmt.warning(s),
+
+    // Comments, annotations, metadata -> muted / dim
+    comment: (s: string) => fmt.muted(fmt.italic(s)),
+    doctag: (s: string) => fmt.muted(s),
+    meta: (s: string) => fmt.muted(s),
+    'meta-keyword': (s: string) => fmt.muted(s),
+
+    // Functions, titles, symbols -> electric accent
+    function: (s: string) => fmt.accent(s),
+    title: (s: string) => fmt.accent(s),
+    symbol: (s: string) => fmt.accent(s),
+
+    // Deletions -> error (red)
+    deletion: (s: string) => fmt.error(s),
+
+    // Text formatting
+    emphasis: (s: string) => fmt.italic(s),
+    strong: (s: string) => fmt.bold(s),
+    link: (s: string) => fmt.underline(s),
+
+    // Unstyled fallbacks
+    variable: (s: string) => s,
+    'template-variable': (s: string) => s,
+    'template-tag': (s: string) => s,
+    params: (s: string) => s,
+    subst: (s: string) => s,
+    section: (s: string) => s,
+    bullet: (s: string) => s,
+    code: (s: string) => s,
+    quote: (s: string) => s,
+    formula: (s: string) => s,
+    default: (s: string) => s,
+  }
+}
+
+export function highlightCode(
+  code: string,
+  rawLang: string | undefined,
+  fmt: ReturnType<typeof createColorFormatter>,
+  theme?: Theme
+): string {
+  if (fmt.level === 0 || !code) {
+    return code
+  }
+  const highlightTheme = theme ?? createHighlightTheme(fmt)
+  const lang = resolveLanguage(rawLang)
+  try {
+    if (lang) {
+      return highlight(code, {
+        language: lang,
+        theme: highlightTheme,
+        ignoreIllegals: true,
+      })
+    }
+    return highlight(code, {
+      theme: highlightTheme,
+      ignoreIllegals: true,
+    })
+  } catch {
+    return code
+  }
+}
 
 let markedConfigured = false
 function configureMarked(): void {
@@ -113,14 +294,7 @@ function formatToken(
     }
 
     case 'code': {
-      let code = token.text
-      if (fmt.level > 0 && token.lang && supportsLanguage(token.lang)) {
-        try {
-          code = highlight(token.text, { language: token.lang })
-        } catch {
-          // fallback to plaintext
-        }
-      }
+      const code = highlightCode(token.text, token.lang, fmt)
       return code + EOL
     }
 
@@ -320,10 +494,12 @@ export class StreamingMarkdownRenderer {
   private insideCodeBlock = false
   private codeLang = ''
   private readonly fmt: ReturnType<typeof createColorFormatter>
+  private readonly highlightTheme: Theme
   private readonly columns: number
 
   constructor(options: MarkdownOptions = {}) {
     this.fmt = createColorFormatter(options.colorLevel)
+    this.highlightTheme = createHighlightTheme(this.fmt)
     this.columns = options.columns ?? getTerminalColumns()
   }
 
@@ -338,7 +514,10 @@ export class StreamingMarkdownRenderer {
       const line = this.buffer.slice(0, newlineIdx)
       this.buffer = this.buffer.slice(newlineIdx + 1)
 
-      output += this.renderLine(line) + '\n'
+      const rendered = this.renderLine(line)
+      if (rendered !== null) {
+        output += rendered + '\n'
+      }
     }
 
     return output
@@ -348,10 +527,11 @@ export class StreamingMarkdownRenderer {
     if (this.buffer.length === 0) return ''
     const remaining = this.buffer
     this.buffer = ''
-    return this.renderLine(remaining)
+    const rendered = this.renderLine(remaining)
+    return rendered !== null ? rendered : ''
   }
 
-  private renderLine(line: string): string {
+  private renderLine(line: string): string | null {
     const trimmed = line.trim()
 
     // 1. Code fence check
@@ -359,22 +539,18 @@ export class StreamingMarkdownRenderer {
       if (!this.insideCodeBlock) {
         this.insideCodeBlock = true
         this.codeLang = trimmed.slice(3).trim()
-        return ''
+        return null
       } else {
         this.insideCodeBlock = false
         this.codeLang = ''
-        return ''
+        return null
       }
     }
 
     // Inside code block
     if (this.insideCodeBlock) {
-      if (this.fmt.level > 0 && this.codeLang && supportsLanguage(this.codeLang)) {
-        try {
-          return highlight(line, { language: this.codeLang })
-        } catch {
-          // fallback
-        }
+      if (this.fmt.level > 0 && line.length > 0) {
+        return highlightCode(line, this.codeLang, this.fmt, this.highlightTheme)
       }
       return line
     }

@@ -80,4 +80,11 @@ describe('core/agent error description and status mapping (Phase 7)', () => {
     const msg = describeModelError(netErr)
     expect(msg).toContain('network error: ENOTFOUND')
   })
+
+  it('unwraps NoOutputGeneratedError into actionable guidance', () => {
+    const noOutputErr = new Error('No output generated. Check the stream for errors.')
+    const msg = describeModelError(noOutputErr)
+    expect(msg).toContain('model returned no output')
+    expect(msg).toContain('reasoning effort')
+  })
 })

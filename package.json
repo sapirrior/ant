@@ -1,6 +1,6 @@
 {
   "name": "ant",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A daily-use, streaming, model-agnostic AI agent CLI",
   "type": "module",
   "private": true,
