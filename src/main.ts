@@ -1,16 +1,18 @@
 #!/usr/bin/env bun
 import { Command } from 'commander'
+import pkg from '../package.json' with { type: 'json' }
 import { registerConfigCommand } from './cli/config.ts'
 import { registerRunCommand } from './cli/run.ts'
 import { registerThreadsCommand } from './cli/threads.ts'
 import { registerCheckpointsCommand } from './cli/checkpoints.ts'
+import { registerUpdateCommand } from './cli/update.ts'
 
 export function createProgram(): Command {
   const program = new Command()
   program
     .name('ant')
     .description('A daily-use, streaming, model-agnostic AI agent CLI')
-    .version('0.1.1')
+    .version(pkg.version)
     .exitOverride((err) => {
       // Keep help and version exit 0
       if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
@@ -32,6 +34,7 @@ export function createProgram(): Command {
   registerConfigCommand(program)
   registerThreadsCommand(program)
   registerCheckpointsCommand(program)
+  registerUpdateCommand(program)
   registerRunCommand(program)
 
   return program
