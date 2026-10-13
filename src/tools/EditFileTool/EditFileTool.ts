@@ -96,7 +96,7 @@ export function createEditFileTool(context: ToolExecutionContext) {
         if (replaceAll) {
           updatedNormalized = normalizedContent.split(normalizedOld).join(normalizedNew)
         } else {
-          updatedNormalized = normalizedContent.replace(normalizedOld, normalizedNew)
+          updatedNormalized = normalizedContent.replace(normalizedOld, () => normalizedNew)
         }
 
         // 6. Restore original line endings

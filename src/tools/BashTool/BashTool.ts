@@ -68,7 +68,9 @@ export function createBashTool(context: ToolExecutionContext) {
       // 1. Classification & policy check BEFORE entering execution queue/timer
       const verdict = classifyBashCommand(input.command, context.cwd)
 
-      if (verdict.status === 'blocked') {
+      const hasDestructiveGrant = context.grants.has('shell.destructive')
+
+      if (verdict.status === 'blocked' && !hasDestructiveGrant) {
         return {
           ok: false,
           output: null,
@@ -76,7 +78,7 @@ export function createBashTool(context: ToolExecutionContext) {
         }
       }
 
-      if (verdict.status === 'ask' && !context.grants.has('shell.destructive')) {
+      if (verdict.status === 'ask' && !hasDestructiveGrant) {
         // Must confirm interactively via /dev/tty
         const confirmed = context.ui?.confirm
           ? context.ui.confirm({
@@ -126,8 +128,14 @@ export function createBashTool(context: ToolExecutionContext) {
           env,
         })
 
+        // Attach error handler immediately to avoid unhandled exception crash (B-007)
+        let spawnErrorMessage: string | null = null
+        child.on('error', (err) => {
+          spawnErrorMessage = err.message
+        })
+
         if (!child.pid) {
-          throw new Error('Failed to spawn bash process.')
+          throw new Error(`Failed to spawn bash process: ${spawnErrorMessage ?? 'unknown spawn error'}`)
         }
 
         const pid = child.pid
@@ -135,8 +143,14 @@ export function createBashTool(context: ToolExecutionContext) {
         let exitCode: number | null = null
         let exitSignal: string | null = null
 
+        // Cap buffer during collection to prevent unbounded memory growth (B-004)
+        const MAX_BUFFER = 100000
         const appendChunk = (chunk: Buffer | string) => {
-          combinedOutput += typeof chunk === 'string' ? chunk : chunk.toString('utf-8')
+          const str = typeof chunk === 'string' ? chunk : chunk.toString('utf-8')
+          combinedOutput += str
+          if (combinedOutput.length > MAX_BUFFER) {
+            combinedOutput = combinedOutput.slice(-MAX_BUFFER)
+          }
         }
 
         child.stdout?.on('data', appendChunk)
@@ -184,11 +198,14 @@ export function createBashTool(context: ToolExecutionContext) {
           hardTimer.unref()
         }
 
+        let foregroundTimeoutHandle: NodeJS.Timeout | null = null
+
         try {
           // If immediate background requested and enabled:
           if (args.background && backgroundEnabled && context.tasks) {
-            // TaskManager hand-off immediately
-            const task = context.tasks.createTask(args.command, child)
+            child.stdout?.removeListener('data', appendChunk)
+            child.stderr?.removeListener('data', appendChunk)
+            const task = context.tasks.createTask(args.command, child, combinedOutput)
             return {
               status: 'running',
               taskId: task.id,
@@ -200,9 +217,9 @@ export function createBashTool(context: ToolExecutionContext) {
           // Otherwise, wait up to foregroundMs
           const waitResult = await Promise.race([
             closePromise.then((res) => ({ type: 'exit' as const, res })),
-            new Promise<{ type: 'foreground_timeout' }>((resolve) =>
-              setTimeout(() => resolve({ type: 'foreground_timeout' }), foregroundMs)
-            ),
+            new Promise<{ type: 'foreground_timeout' }>((resolve) => {
+              foregroundTimeoutHandle = setTimeout(() => resolve({ type: 'foreground_timeout' }), foregroundMs)
+            }),
           ])
 
           if (waitResult.type === 'exit') {
@@ -218,7 +235,9 @@ export function createBashTool(context: ToolExecutionContext) {
 
           // Still running after foregroundMs
           if (backgroundEnabled && context.tasks) {
-            const task = context.tasks.createTask(args.command, child)
+            child.stdout?.removeListener('data', appendChunk)
+            child.stderr?.removeListener('data', appendChunk)
+            const task = context.tasks.createTask(args.command, child, combinedOutput)
             return {
               status: 'running',
               taskId: task.id,
@@ -241,6 +260,7 @@ export function createBashTool(context: ToolExecutionContext) {
             error: `Command timed out after ${(foregroundMs / 1000).toFixed(0)}s.`,
           }
         } finally {
+          if (foregroundTimeoutHandle) clearTimeout(foregroundTimeoutHandle)
           if (hardTimer) clearTimeout(hardTimer)
           context.abortSignal?.removeEventListener('abort', abortHandler)
         }

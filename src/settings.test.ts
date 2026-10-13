@@ -76,7 +76,8 @@ describe('settings module', () => {
     expect(KEYS['output']!.parse('text')).toBe('text')
     expect(KEYS['output']!.parse('md')).toBe('md')
     expect(KEYS['output']!.parse('json')).toBe('json')
-    expect(() => KEYS['output']!.parse('yaml')).toThrow(/must be "text", "md", or "json"/)
+    expect(KEYS['output']!.parse('stream-json')).toBe('stream-json')
+    expect(() => KEYS['output']!.parse('yaml')).toThrow(/must be "text", "md", "json", or "stream-json"/)
 
     expect(KEYS['reasoning']!.parse('low')).toBe('low')
     expect(KEYS['reasoning']!.parse('max')).toBe('max')

@@ -22,7 +22,7 @@ export function registerRunCommand(program: Command): void {
     .option('-s, --max-steps <number>', 'Maximum tool execution steps')
     .option('-t, --timeout <duration>', 'Wall-clock timeout e.g. "30m", "10s"')
     .option('--retries <number>', 'Number of API request retries (0-10)')
-    .option('-o, --output <format>', 'Output format: text | md | json')
+    .option('-o, --output <format>', 'Output format: text | md | json | stream-json')
     .option('-l, --log-level <level>', 'Log level: error | info | debug')
     .option('--theme <theme>', 'Theme: auto | dark | light | ansi')
     .option('-e, --effort <level>', 'Reasoning effort: provider-default | none | minimal | low | medium | high | xhigh | max')
@@ -93,8 +93,8 @@ export function registerRunCommand(program: Command): void {
 
         // 6. Resolve output: CLI > env > settings > text
         const outputFormat = (options.output ?? env.ANT_OUTPUT ?? userSettings.output ?? 'text') as OutputFormat
-        if (outputFormat !== 'text' && outputFormat !== 'md' && outputFormat !== 'json') {
-          throw new Error(`Invalid output format: "${outputFormat}". Allowed: text, md, json`)
+        if (outputFormat !== 'text' && outputFormat !== 'md' && outputFormat !== 'json' && outputFormat !== 'stream-json') {
+          throw new Error(`Invalid output format: "${outputFormat}". Allowed: text, md, json, stream-json`)
         }
 
         // 7. Resolve logLevel: CLI > env > settings > info

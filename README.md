@@ -109,7 +109,8 @@ ant checkpoints restore 1
 Settings are saved in `~/.ant/settings.json` and can be managed with `ant config`:
 
 ```bash
-ant config get                       # View current configuration
+ant config                           # View current configuration
+ant config get model                 # Get specific configuration value
 ant config set model <provider/id>   # Set default model
 ant config set allow.read true       # Enable read permission by default
 ant config set allow.bash true       # Enable bash permission by default

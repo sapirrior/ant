@@ -55,10 +55,6 @@ export const PROVIDERS: Record<string, ProviderSpec> = {
 }
 
 export function parseModelString(rawModel: string): { provider: string; modelId: string } {
-  if (rawModel.includes(':')) {
-    throw new Error(`Invalid model format: "${rawModel}". Colons are not allowed. Use "provider/model-id" (e.g. "anthropic/model-name").`)
-  }
-
   const slashIdx = rawModel.indexOf('/')
   if (slashIdx <= 0 || slashIdx === rawModel.length - 1) {
     throw new Error(`Invalid model format: "${rawModel}". Expected "provider/model-id" (e.g. "anthropic/claude-3-7-sonnet-20250219").`)

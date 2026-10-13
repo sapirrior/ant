@@ -79,6 +79,11 @@ describe('bash allowlist classifier', () => {
     'ls -la | grep src',
     'grep -rn foo src | head',
     'echo ok > /dev/null',
+    'ls 2>&1',
+    'git status 2>&1',
+    'grep -E "foo|bar" package.json',
+    'jq \'.name | .\' package.json',
+    'echo "a > b"',
   ]
 
   const askCases = [
@@ -143,6 +148,13 @@ describe('bash allowlist classifier', () => {
     'echo "unterminated string',
     "echo 'unterminated single",
     'ls\nrm x',
+    'sort -ofile.txt in.txt',
+    'sort --output=out.txt in.txt',
+    'rg --pre=cmd foo .',
+    'grep --file=/etc/shadow x .',
+    'python3 -v',
+    'cat .env.staging',
+    'cat .env.test',
   ]
 
   const blockedCases = [
@@ -169,6 +181,12 @@ describe('bash allowlist classifier', () => {
     'chmod -R 777 /',
     'chown -R root /',
     'echo test > /dev/sda',
+    '/bin/rm -rf /',
+    'rm -rf ~/',
+    'rm -rf /usr',
+    'env sudo ls',
+    '/usr/bin/sudo ls',
+    'FOO=1 rm -rf /',
   ]
 
   it('classifies all safe commands as safe', () => {

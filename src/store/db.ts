@@ -90,8 +90,12 @@ export function openDb(customPath?: string): Database {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
 
   if (!existsSync(dbPath)) {
-    const fd = openSync(dbPath, 'w', 0o600)
-    closeSync(fd)
+    try {
+      const fd = openSync(dbPath, 'wx', 0o600)
+      closeSync(fd)
+    } catch {
+      // ignore EEXIST race
+    }
   }
 
   const db = new Database(dbPath)
@@ -102,23 +106,22 @@ export function openDb(customPath?: string): Database {
   db.run('PRAGMA foreign_keys = ON;')
   db.run('PRAGMA synchronous = NORMAL;')
 
-  // Migration management via user_version
-  const row = db.query('PRAGMA user_version;').get() as { user_version: number }
-  const currentVersion = row ? row.user_version : 0
+  // Migration management inside immediate transaction
+  db.transaction(() => {
+    const row = db.query('PRAGMA user_version;').get() as { user_version: number }
+    const currentVersion = row ? row.user_version : 0
 
-  if (currentVersion > MIGRATIONS.length) {
-    db.close()
-    throw new Error('database was created by a newer ant')
-  }
+    if (currentVersion > MIGRATIONS.length) {
+      throw new Error('database was created by a newer ant')
+    }
 
-  for (let v = currentVersion; v < MIGRATIONS.length; v++) {
-    const sql = MIGRATIONS[v]!
-    const nextVersion = v + 1
-    db.transaction(() => {
+    for (let v = currentVersion; v < MIGRATIONS.length; v++) {
+      const sql = MIGRATIONS[v]!
+      const nextVersion = v + 1
       db.exec(sql)
       db.run(`PRAGMA user_version = ${nextVersion};`)
-    })()
-  }
+    }
+  }).immediate()
 
   return db
 }

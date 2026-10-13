@@ -136,8 +136,6 @@ export async function runAgent(
 ): Promise<ModelOutcome> {
   const { config, messages, signal, threadId, onCheckpoint, onEvent, agentContext } = options
   const { model, provider } = resolveLanguageModel(config.model)
-  const instructions = buildInstructions(config)
-
   const readState = new Map<string, string>()
   const tasks = agentContext?.tasks ?? new TaskManagerRegistry()
 
@@ -156,6 +154,11 @@ export async function runAgent(
   }
 
   const tools = buildTools(toolContext, config.settings)
+  const toolDescriptions = Object.entries(tools).map(([name, t]) => ({
+    name,
+    description: (t as { description?: string }).description,
+  }))
+  const instructions = buildInstructions(config, toolDescriptions)
   let stepsExecuted = 0
   const toolCallStartTimes = new Map<string, number>()
   let streamError: unknown = null
@@ -230,12 +233,14 @@ export async function runAgent(
         case 'tool-result': {
           const startTime = toolCallStartTimes.get(part.toolCallId) ?? Date.now()
           const durationMs = Date.now() - startTime
+          const isErr = (part.output as any)?.ok === false
           onEvent?.({
             type: 'tool-result',
             callId: part.toolCallId,
             toolName: part.toolName,
-            output: part.output,
+            output: isErr ? ((part.output as any)?.error ?? part.output) : part.output,
             durationMs,
+            isError: isErr,
           })
           break
         }

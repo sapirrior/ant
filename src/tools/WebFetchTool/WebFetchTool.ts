@@ -164,8 +164,35 @@ export function createWebFetchTool(context: ToolExecutionContext) {
     inputSchema: webFetchInputSchema,
     execute: async (input) => {
       return executeWithPolicy('WebFetch', input, context, async (args) => {
+        let parsedUrl: URL
+        try {
+          parsedUrl = new URL(args.url)
+        } catch {
+          throw new Error(`Invalid URL: "${args.url}"`)
+        }
+
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+          throw new Error(`Invalid protocol "${parsedUrl.protocol}". Only http: and https: are allowed.`)
+        }
+
+        const hostname = parsedUrl.hostname.toLowerCase()
+        if (
+          hostname === 'localhost' ||
+          hostname === '127.0.0.1' ||
+          hostname === '::1' ||
+          hostname === '169.254.169.254' ||
+          hostname.startsWith('10.') ||
+          hostname.startsWith('192.168.') ||
+          /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+        ) {
+          throw new Error(`Access to local or private network address "${hostname}" is prohibited.`)
+        }
+
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 20000)
+
+        const onAbort = () => controller.abort()
+        context.abortSignal?.addEventListener('abort', onAbort, { once: true })
 
         try {
           const res = await fetch(args.url, {

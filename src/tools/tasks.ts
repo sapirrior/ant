@@ -29,7 +29,7 @@ export class TaskManagerRegistry {
   private tasks = new Map<string, ShellTask>()
   private counter = 0
 
-  createTask(command: string, child: ChildProcess): ShellTask {
+  createTask(command: string, child: ChildProcess, initialBuffer = ''): ShellTask {
     this.counter++
     const id = `t${this.counter}`
     const task: ShellTask = {
@@ -40,7 +40,7 @@ export class TaskManagerRegistry {
       status: 'running',
       exitCode: null,
       signal: null,
-      buf: '',
+      buf: initialBuffer,
       droppedChars: 0,
       readCursor: 0,
       waiters: [],
@@ -160,7 +160,7 @@ export class TaskManagerRegistry {
     if (!task) {
       throw new Error(`Task not found: "${id}"`)
     }
-    if (task.status !== 'running' || !task.child.pid) {
+    if ((task.status !== 'running' && task.status !== 'killed') || !task.child.pid || task.child.exitCode !== null) {
       return
     }
 
@@ -178,8 +178,8 @@ export class TaskManagerRegistry {
 
     // Auto-escalate to SIGKILL if SIGTERM doesn't kill within 3s
     if (signal === 'SIGTERM') {
-      setTimeout(() => {
-        if (task.status === 'killed' && task.child.pid) {
+      const timer = setTimeout(() => {
+        if (task.child.pid && task.child.exitCode === null) {
           try {
             process.kill(-task.child.pid, 'SIGKILL')
           } catch {
@@ -187,22 +187,23 @@ export class TaskManagerRegistry {
           }
         }
       }, 3000)
+      timer.unref()
     }
   }
 
   async shutdown(graceMs = 3000): Promise<void> {
-    const runningTasks: ShellTask[] = []
+    const pendingTasks: ShellTask[] = []
     for (const task of this.tasks.values()) {
-      if (task.status === 'running' && task.child.pid) {
-        runningTasks.push(task)
+      if (task.child.exitCode === null && task.child.pid) {
+        pendingTasks.push(task)
         this.stop(task.id, 'SIGTERM')
       }
     }
 
-    if (runningTasks.length === 0) return
+    if (pendingTasks.length === 0) return
 
-    const waitPromises = runningTasks.map((task) => {
-      if (task.status !== 'running') return Promise.resolve()
+    const waitPromises = pendingTasks.map((task) => {
+      if (task.child.exitCode !== null) return Promise.resolve()
       return new Promise<void>((resolve) => {
         const onExit = () => resolve()
         task.waiters.push(onExit)
@@ -220,7 +221,7 @@ export class TaskManagerRegistry {
 
   killAll(): void {
     for (const task of this.tasks.values()) {
-      if (task.status === 'running' && task.child.pid) {
+      if (task.child.exitCode === null && task.child.pid) {
         task.status = 'killed'
         try {
           process.kill(-task.child.pid, 'SIGKILL')

@@ -26,10 +26,19 @@ export function resolveGrants(options: GrantOptions): Grants {
     caps.add('shell.destructive')
   }
 
-  const immutableCaps: ReadonlySet<Capability> = Object.freeze(new Set(caps))
+  const frozenSet = new Set(caps)
+  frozenSet.add = () => {
+    throw new Error('Cannot mutate read-only grants set')
+  }
+  frozenSet.delete = () => {
+    throw new Error('Cannot mutate read-only grants set')
+  }
+  frozenSet.clear = () => {
+    throw new Error('Cannot mutate read-only grants set')
+  }
 
   return {
-    has: (cap: Capability) => immutableCaps.has(cap),
-    capabilities: immutableCaps,
+    has: (cap: Capability) => caps.has(cap),
+    capabilities: frozenSet as ReadonlySet<Capability>,
   }
 }

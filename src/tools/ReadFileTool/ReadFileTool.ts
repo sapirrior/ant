@@ -4,6 +4,7 @@ import { relative } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { resolveWithinRoot } from '../../policy/paths.ts'
+import { isSensitivePath } from '../../policy/sensitive.ts'
 import { snapshot } from '../fs.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
@@ -22,6 +23,10 @@ export function createReadFileTool(context: ToolExecutionContext) {
     execute: async (input) => {
       return executeWithPolicy('ReadFile', input, context, async ({ path, offset, limit }) => {
         const fullPath = resolveWithinRoot(path, context.cwd)
+
+        if (isSensitivePath(fullPath) && !context.grants.has('shell.destructive')) {
+          throw new Error(`Access denied: reading sensitive file "${path}" requires explicit destructive authorization.`)
+        }
 
         if (!existsSync(fullPath)) {
           throw new Error(`File not found: ${path}`)

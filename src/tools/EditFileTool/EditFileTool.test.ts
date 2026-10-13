@@ -93,6 +93,20 @@ describe('EditFileTool', () => {
     expect(fileOnDisk).toBe('line 1\r\nline TWO\r\nline 3\r\n')
   })
 
+  it('preserves special replacement tokens like $&, $$, $1 literally (B-008)', async () => {
+    writeFileSync(testFile, 'price is COST and count is NUM\n', 'utf-8')
+    const editTool = createEditFileTool(context)
+    if (!editTool.execute) throw new Error('execute is undefined')
+    const result = (await editTool.execute(
+      { path: 'sample.txt', oldContent: 'COST', newContent: '$$50 and $& $1', replaceAll: false },
+      { ...execOptions, toolCallId: '5b' }
+    )) as ToolExecutionResult<{ status: string }>
+
+    expect(result.ok).toBe(true)
+    const fileOnDisk = readFileSync(testFile, 'utf-8')
+    expect(fileOnDisk).toBe('price is $$50 and $& $1 and count is NUM\n')
+  })
+
   it('enforces CAS #1 read-before-write guard when readState is present', async () => {
     const readState = new Map<string, string>()
     const ctxWithReadState: ToolExecutionContext = {

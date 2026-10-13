@@ -18,7 +18,7 @@ export interface Settings {
   timeout?: string
   retries?: number
   streamRetries?: number
-  output?: 'text' | 'md' | 'json'
+  output?: 'text' | 'md' | 'json' | 'stream-json'
   reasoning?: ReasoningEffort
   logLevel?: 'error' | 'info' | 'debug'
   theme?: 'auto' | 'dark' | 'light' | 'ansi'
@@ -116,30 +116,38 @@ export async function withFileLock<T>(lockPath: string, fn: () => T | Promise<T>
   const retryIntervalMs = 50
   const staleAgeMs = 30000
   const startTime = Date.now()
-  mkdirSync(dirname(lockPath), { recursive: true })
+  const dir = dirname(lockPath)
+  mkdirSync(dir, { recursive: true })
+
+  const token = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  let acquired = false
 
   while (true) {
     try {
       const fd = openSync(lockPath, 'wx')
-      writeFileSync(fd, `${process.pid}\n${Date.now()}`, 'utf-8')
+      writeFileSync(fd, `${token}\n${process.pid}\n${Date.now()}`, 'utf-8')
       closeSync(fd)
+      acquired = true
       break
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EEXIST') {
         // Check if stale
         try {
           const content = readFileSync(lockPath, 'utf-8')
-          const [pidStr, lockTimeStr] = content.trim().split('\n')
-          const pid = pidStr ? Number.parseInt(pidStr, 10) : 0
-          const lockTime = lockTimeStr ? Number.parseInt(lockTimeStr, 10) : 0
-          const age = Date.now() - lockTime
+          const lines = content.trim().split('\n')
+          // If empty file was just created, don't immediately treat as stale
+          if (lines.length >= 2) {
+            const pid = lines[1] ? Number.parseInt(lines[1], 10) : 0
+            const lockTime = lines[2] ? Number.parseInt(lines[2], 10) : 0
+            const age = Date.now() - lockTime
 
-          if (age > staleAgeMs || (pid > 0 && !pidAlive(pid))) {
-            try {
-              unlinkSync(lockPath)
-              continue
-            } catch {
-              // ignore
+            if (age > staleAgeMs || (pid > 0 && !pidAlive(pid))) {
+              try {
+                unlinkSync(lockPath)
+                continue
+              } catch {
+                // ignore
+              }
             }
           }
         } catch {
@@ -159,10 +167,15 @@ export async function withFileLock<T>(lockPath: string, fn: () => T | Promise<T>
   try {
     return await fn()
   } finally {
-    try {
-      unlinkSync(lockPath)
-    } catch {
-      // ignore
+    if (acquired) {
+      try {
+        const content = readFileSync(lockPath, 'utf-8')
+        if (content.startsWith(token)) {
+          unlinkSync(lockPath)
+        }
+      } catch {
+        // ignore
+      }
     }
   }
 }
@@ -274,10 +287,12 @@ export const KEYS: Record<string, KeyDefinition> = {
     key: 'model',
     describe: 'Model in provider/model-id format',
     parse: (v) => {
-      if (!v.includes('/') || v.includes(':')) {
-        throw new Error(`Invalid model format: "${v}". Use "provider/model-id" format without colons.`)
+      const trimmed = v.trim()
+      const slashIdx = trimmed.indexOf('/')
+      if (slashIdx <= 0 || slashIdx === trimmed.length - 1) {
+        throw new Error(`Invalid model format: "${v}". Use "provider/model-id" format.`)
       }
-      return v.trim()
+      return trimmed
     },
     get: (s) => s.model,
     set: (s, v) => { s.model = v as string },
@@ -332,15 +347,15 @@ export const KEYS: Record<string, KeyDefinition> = {
   },
   output: {
     key: 'output',
-    describe: 'Output format: text | md | json',
+    describe: 'Output format: text | md | json | stream-json',
     parse: (v) => {
-      if (v !== 'text' && v !== 'md' && v !== 'json') {
-        throw new Error(`Setting "output" must be "text", "md", or "json" (got "${v}")`)
+      if (v !== 'text' && v !== 'md' && v !== 'json' && v !== 'stream-json') {
+        throw new Error(`Setting "output" must be "text", "md", "json", or "stream-json" (got "${v}")`)
       }
       return v
     },
     get: (s) => s.output,
-    set: (s, v) => { s.output = v as 'text' | 'md' | 'json' },
+    set: (s, v) => { s.output = v as 'text' | 'md' | 'json' | 'stream-json' },
     unset: (s) => { delete s.output },
   },
   logLevel: {

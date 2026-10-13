@@ -195,6 +195,17 @@ export class Engine {
           }
           appendMessage(db, thread.id, userMessage)
           messages.push(userMessage)
+        } else {
+          // If continuing/resuming without an additional prompt, ensure conversation ends in a user turn
+          const lastMsg = messages[messages.length - 1]
+          if (!lastMsg || lastMsg.role !== 'user') {
+            const continueMessage: ModelMessage = {
+              role: 'user',
+              content: 'Continue where you left off.',
+            }
+            appendMessage(db, thread.id, continueMessage)
+            messages.push(continueMessage)
+          }
         }
       }
 

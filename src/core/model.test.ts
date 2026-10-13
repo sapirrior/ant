@@ -13,8 +13,14 @@ describe('model registry', () => {
     })
   })
 
-  it('rejects colons in model string', () => {
-    expect(() => parseModelString('google:gemini-2.5-flash')).toThrow(/Colons are not allowed/)
+  it('rejects provider without slash in model string', () => {
+    expect(() => parseModelString('google:gemini-2.5-flash')).toThrow(/Expected "provider\/model-id"/)
+  })
+
+  it('allows model IDs with colons such as tags (B-029)', () => {
+    const parsed = parseModelString('openrouter/deepseek/deepseek-r1:free')
+    expect(parsed.provider).toBe('openrouter')
+    expect(parsed.modelId).toBe('deepseek/deepseek-r1:free')
   })
 
   it('throws when Anthropic key is missing', () => {

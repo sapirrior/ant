@@ -217,17 +217,20 @@ export async function executeWebSearch(
       signal: controller.signal,
     })
 
-    clearTimeout(timeoutId)
-
-    if (!response.ok) {
-      throw new Error(`DuckDuckGo web search failed with HTTP status ${response.status} (${response.statusText})`)
+    let html: string
+    try {
+      if (!response.ok) {
+        throw new Error(`DuckDuckGo web search failed with HTTP status ${response.status} (${response.statusText})`)
+      }
+      html = await response.text()
+    } finally {
+      clearTimeout(timeoutId)
     }
 
-    const html = await response.text()
-
     if (
-      html.includes('anomaly-modal') ||
-      html.includes('captcha') ||
+      html.includes('id="anomaly-modal"') ||
+      html.includes('class="anomaly-modal"') ||
+      html.includes('anomaly_modal') ||
       html.includes('Please complete the security check')
     ) {
       throw new Error('Search rate limited by DuckDuckGo. Please retry in a few moments.')

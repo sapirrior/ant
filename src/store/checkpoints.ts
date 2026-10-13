@@ -193,6 +193,7 @@ export interface RestoreResult {
   restoredSeq: number
   plan: RestorePlanItem[]
   dryRun: boolean
+  conflicts?: RestorePlanItem[]
 }
 
 export function restoreCheckpoint(
@@ -279,7 +280,17 @@ export function restoreCheckpoint(
     }
   }
 
-  // 4. Abort on conflicts without --force
+  // 4. Dry run returns plan and conflicts without throwing
+  if (options.dryRun) {
+    return {
+      restoredSeq: 0,
+      plan,
+      dryRun: true,
+      conflicts,
+    }
+  }
+
+  // 5. Abort on conflicts without --force
   if (conflicts.length > 0 && !options.force) {
     const conflictLines = conflicts
       .map(
@@ -292,16 +303,19 @@ export function restoreCheckpoint(
     )
   }
 
-  // 5. Dry run
-  if (options.dryRun) {
-    return {
-      restoredSeq: 0,
-      plan,
-      dryRun: true,
+  // 6. Pre-validate all target blobs exist BEFORE mutating any files
+  for (const item of plan) {
+    if (item.action !== 'delete' && item.targetHash) {
+      const blobRow = db
+        .query('SELECT hash FROM blobs WHERE hash = ?')
+        .get(item.targetHash) as { hash: string } | null
+      if (!blobRow) {
+        throw new Error(`Corrupted blob store: blob with hash ${item.targetHash} not found`)
+      }
     }
   }
 
-  // 6. Apply restoration to disk and capture snapshots for restore checkpoint
+  // 7. Apply restoration to disk and capture snapshots for restore checkpoint
   const restoreCheckpointFiles: CheckpointInputFile[] = []
 
   for (const item of plan) {

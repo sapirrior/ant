@@ -1,3 +1,4 @@
+import { isSensitivePath } from '../../policy/sensitive.ts'
 import { existsSync, statSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
@@ -41,6 +42,9 @@ async function scanDirectory(
         await scanDirectory(fullPath, rootCwd, regex, matches, maxResults)
       }
     } else if (entry.isFile()) {
+      if (isSensitivePath(entry.name)) {
+        continue
+      }
       try {
         const text = await readFile(fullPath, 'utf-8')
         const lines = text.split('\n')

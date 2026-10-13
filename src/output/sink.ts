@@ -1,4 +1,5 @@
 import type { ModelOutcome, OutputFormat, RunEvent } from '../core/types.ts'
+import pkg from '../../package.json' with { type: 'json' }
 import { StreamingMarkdownRenderer } from './markdown.ts'
 import {
   ResultSchema,
@@ -123,7 +124,7 @@ export class StreamJsonSink implements OutputSink {
     this.writeLine({
       type: 'init',
       ...initData,
-      antVersion: '0.1.0',
+      antVersion: pkg.version ?? '0.2.0',
     })
   }
 
