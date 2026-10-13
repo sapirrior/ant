@@ -21,14 +21,18 @@
 
 ### 1. Install
 
+**Using the official installer (Recommended):**
 ```bash
-git clone https://github.com/your-username/ant.git
+curl -fsSL https://raw.githubusercontent.com/sapirrior/ant/main/installer/install.sh | bash
+```
+
+**Or build from source:**
+```bash
+git clone https://github.com/sapirrior/ant.git
 cd ant
 npm install
 bun run build
 ```
-
-*(Prerequisites: [Bun](https://bun.sh) >= 1.2 on Linux or macOS)*
 
 ### 2. Configure Your Model
 
