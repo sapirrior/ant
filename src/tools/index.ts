@@ -13,10 +13,6 @@ import { createWebSearchTool } from './WebSearchTool/WebSearchTool.ts'
 import { createWebFetchTool } from './WebFetchTool/WebFetchTool.ts'
 import { createMcpTool } from './McpTool/McpTool.ts'
 
-export interface ToolDef {
-  name: ToolName
-  create(ctx: ToolExecutionContext): import('ai').Tool
-}
 
 export function buildTools(context: ToolExecutionContext, settings?: Settings): ToolSet {
   const tools: ToolSet = {}
@@ -43,7 +39,7 @@ export function buildTools(context: ToolExecutionContext, settings?: Settings): 
   const bashGranted = context.grants.has('shell.run') && isEnabled('Bash')
   if (bashGranted) {
     tools.Bash = createBashTool(context)
-    // TaskManager only exposed if Bash is also enabled and exposed (Plan §8.7 coupling)
+    // TaskManager only exposed if Bash is also enabled and exposed
     if (isEnabled('TaskManager') && context.tasks) {
       tools.TaskManager = createTaskManagerTool(context)
     }

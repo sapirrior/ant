@@ -3,6 +3,18 @@ export type McpToolVerdict =
   | { status: 'denied'; reason: string }
   | { status: 'ask'; reason: string }
 
+function globToRegex(pattern: string): RegExp {
+  let pat = pattern.trim()
+  if (!pat.includes('/') && pat !== '*') {
+    pat = `${pat}/*`
+  }
+  const escaped = pat
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')
+  return new RegExp(`^${escaped}$`)
+}
+
 export function checkMcpToolPolicy(
   server: string,
   tool: string,
@@ -14,12 +26,11 @@ export function checkMcpToolPolicy(
   const matches = (pattern: string): boolean => {
     const trimmed = pattern.trim()
     if (!trimmed) return false
-    if (trimmed === '*' || trimmed === '*/*') return true
-    if (trimmed.endsWith('/*')) {
-      const prefix = trimmed.slice(0, -2)
-      return prefix === server
+    try {
+      return globToRegex(trimmed).test(fullTarget)
+    } catch {
+      return false
     }
-    return trimmed === fullTarget
   }
 
   // 1. Explicit denial takes immediate precedence without asking

@@ -1,10 +1,10 @@
 import { isSensitivePath } from '../../policy/sensitive.ts'
 import { existsSync, statSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
-import { resolveWithinRoot } from '../../policy/paths.ts'
+import { relToRoot, resolveWithinRoot } from '../../policy/paths.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { GREP_DESCRIPTION } from './prompt.ts'
@@ -22,36 +22,46 @@ interface GrepMatch {
 }
 
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.cache', 'dist', 'build', '.ant'])
+const MAX_GREP_FILE_BYTES = 2 * 1024 * 1024 // 2 MiB
 
 async function scanDirectory(
   dirPath: string,
   rootCwd: string,
   regex: RegExp,
   matches: GrepMatch[],
-  maxResults: number
+  internalLimit: number,
+  hasSensitiveGrant: boolean
 ): Promise<void> {
-  if (matches.length >= maxResults) return
+  if (matches.length >= internalLimit) return
 
   const entries = await readdir(dirPath, { withFileTypes: true })
   for (const entry of entries) {
-    if (matches.length >= maxResults) break
+    if (matches.length >= internalLimit) break
 
     const fullPath = join(dirPath, entry.name)
     if (entry.isDirectory()) {
       if (!IGNORED_DIRS.has(entry.name)) {
-        await scanDirectory(fullPath, rootCwd, regex, matches, maxResults)
+        await scanDirectory(fullPath, rootCwd, regex, matches, internalLimit, hasSensitiveGrant)
       }
     } else if (entry.isFile()) {
-      if (isSensitivePath(entry.name)) {
+      if (isSensitivePath(fullPath) && !hasSensitiveGrant) {
         continue
       }
       try {
-        const text = await readFile(fullPath, 'utf-8')
+        const stats = statSync(fullPath)
+        if (stats.size > MAX_GREP_FILE_BYTES) {
+          continue
+        }
+        const buf = await readFile(fullPath)
+        if (buf.includes(0)) {
+          continue
+        }
+        const text = buf.toString('utf-8')
         const lines = text.split('\n')
-        const relPath = relative(rootCwd, fullPath)
+        const relPath = relToRoot(rootCwd, fullPath)
 
         for (let i = 0; i < lines.length; i++) {
-          if (matches.length >= maxResults) break
+          if (matches.length >= internalLimit) break
           const line = lines[i]!
           if (regex.test(line)) {
             matches.push({
@@ -80,18 +90,36 @@ export function createGrepTool(context: ToolExecutionContext) {
           throw new Error(`Path not found: ${path}`)
         }
 
-        const regex = new RegExp(pattern)
+        let regex: RegExp
+        try {
+          regex = new RegExp(pattern)
+        } catch (err) {
+          throw new Error(`Invalid regex: ${err instanceof Error ? err.message : String(err)}`)
+        }
+
+        const internalLimit = maxResults + 1
         const matches: GrepMatch[] = []
+        const hasSensitiveGrant = Boolean(context.grants.has('fs.sensitive'))
 
         const stats = statSync(fullPath)
         if (stats.isDirectory()) {
-          await scanDirectory(fullPath, context.cwd, regex, matches, maxResults)
+          await scanDirectory(fullPath, context.cwd, regex, matches, internalLimit, hasSensitiveGrant)
         } else {
-          const text = await readFile(fullPath, 'utf-8')
+          if (isSensitivePath(fullPath) && !hasSensitiveGrant) {
+            throw new Error(`Access denied: searching sensitive file "${path}" requires explicit sensitive authorization.`)
+          }
+          if (stats.size > MAX_GREP_FILE_BYTES) {
+            throw new Error(`File "${path}" is too large to grep (${Math.round(stats.size / (1024 * 1024))} MiB). Limit is 2 MiB.`)
+          }
+          const buf = await readFile(fullPath)
+          if (buf.includes(0)) {
+            throw new Error(`Cannot grep binary file "${path}".`)
+          }
+          const text = buf.toString('utf-8')
           const lines = text.split('\n')
-          const relPath = relative(context.cwd, fullPath)
+          const relPath = relToRoot(context.cwd, fullPath)
           for (let i = 0; i < lines.length; i++) {
-            if (matches.length >= maxResults) break
+            if (matches.length >= internalLimit) break
             const line = lines[i]!
             if (regex.test(line)) {
               matches.push({
@@ -103,11 +131,14 @@ export function createGrepTool(context: ToolExecutionContext) {
           }
         }
 
+        const truncated = matches.length > maxResults
+        const returnedMatches = truncated ? matches.slice(0, maxResults) : matches
+
         return {
           pattern,
-          matches,
-          totalMatches: matches.length,
-          truncated: matches.length >= maxResults,
+          matches: returnedMatches,
+          totalMatches: returnedMatches.length,
+          truncated,
         }
       })
     },

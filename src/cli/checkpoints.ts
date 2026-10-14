@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import { Command } from 'commander'
 import { acquireLease, openDb, releaseLease } from '../store/db.ts'
 import { getThread, resolveThreadId } from '../store/threads.ts'
@@ -7,16 +8,16 @@ import {
   restoreCheckpoint,
   type CheckpointRecord,
 } from '../store/checkpoints.ts'
+import { formatTimeAgo } from '../utils/format.ts'
+import { parseIntStrict } from '../utils/number.ts'
+import { notice } from '../output/notice.ts'
 
-function formatTimeAgo(timestampMs: number): string {
-  const diffSec = Math.floor((Date.now() - timestampMs) / 1000)
-  if (diffSec < 60) return 'just now'
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}h ago`
-  const diffDays = Math.floor(diffHour / 24)
-  return `${diffDays}d ago`
+function getRealCwd(): string {
+  try {
+    return realpathSync(process.cwd())
+  } catch {
+    return process.cwd()
+  }
 }
 
 function renderCheckpointsList(threadId: string, threadTitle: string, checkpoints: readonly CheckpointRecord[]): string {
@@ -50,8 +51,9 @@ export function registerCheckpointsCommand(program: Command): void {
     .action((options) => {
       const db = openDb()
       try {
-        const threadId = resolveThreadId(db, options.thread, process.cwd())
-        const thread = getThread(db, threadId, process.cwd())
+        const cwd = getRealCwd()
+        const threadId = resolveThreadId(db, options.thread, cwd)
+        const thread = getThread(db, threadId, cwd)
         const records = listCheckpoints(db, thread.id)
 
         if (options.json) {
@@ -68,7 +70,7 @@ export function registerCheckpointsCommand(program: Command): void {
           process.stdout.write(renderCheckpointsList(thread.id, thread.title, records))
         }
       } catch (err) {
-        process.stderr.write(`[ant] error: ${err instanceof Error ? err.message : String(err)}\n`)
+        notice.error(err instanceof Error ? err.message : String(err))
         process.exitCode = 1
       } finally {
         db.close()
@@ -83,13 +85,10 @@ export function registerCheckpointsCommand(program: Command): void {
     .action((seqStr: string, options) => {
       const db = openDb()
       try {
-        const seq = Number.parseInt(seqStr, 10)
-        if (Number.isNaN(seq) || seq <= 0) {
-          throw new Error(`Invalid checkpoint sequence number: "${seqStr}". Must be a positive integer.`)
-        }
-
-        const threadId = resolveThreadId(db, options.thread, process.cwd())
-        const thread = getThread(db, threadId, process.cwd())
+        const seq = parseIntStrict('checkpoint sequence number', seqStr, { min: 1 })
+        const cwd = getRealCwd()
+        const threadId = resolveThreadId(db, options.thread, cwd)
+        const thread = getThread(db, threadId, cwd)
         const cp = getCheckpoint(db, thread.id, seq)
 
         if (options.json) {
@@ -116,7 +115,7 @@ export function registerCheckpointsCommand(program: Command): void {
 
         process.stdout.write(out)
       } catch (err) {
-        process.stderr.write(`[ant] error: ${err instanceof Error ? err.message : String(err)}\n`)
+        notice.error(err instanceof Error ? err.message : String(err))
         process.exitCode = 1
       } finally {
         db.close()
@@ -132,20 +131,22 @@ export function registerCheckpointsCommand(program: Command): void {
     .action((seqStr: string, options) => {
       const db = openDb()
       try {
-        const seq = Number.parseInt(seqStr, 10)
-        if (Number.isNaN(seq) || seq <= 0) {
-          throw new Error(`Invalid checkpoint sequence number: "${seqStr}". Must be a positive integer.`)
-        }
+        const seq = parseIntStrict('checkpoint sequence number', seqStr, { min: 1 })
+        const cwd = getRealCwd()
+        const threadId = resolveThreadId(db, options.thread, cwd)
+        const thread = getThread(db, threadId, cwd)
 
-        const threadId = resolveThreadId(db, options.thread, process.cwd())
-        const thread = getThread(db, threadId, process.cwd())
-
-        if (thread.cwd !== process.cwd()) {
+        if (thread.cwd !== cwd) {
           throw new Error(`thread belongs to ${thread.cwd}; cd there first`)
         }
 
         // Acquire lease during restoration
         acquireLease(db, thread.id)
+        let sigintReceived = false
+        const onSigint = () => {
+          sigintReceived = true
+        }
+        process.on('SIGINT', onSigint)
         try {
           const res = restoreCheckpoint(db, thread.id, seq, {
             cwd: thread.cwd,
@@ -160,18 +161,22 @@ export function registerCheckpointsCommand(program: Command): void {
               process.stdout.write(`  ${item.action.toUpperCase()} ${item.path}${statusStr}\n`)
             }
           } else {
-            process.stdout.write(
-              `[ant] restored workspace to before checkpoint #${seq} (new checkpoint #${res.restoredSeq} created)\n`
+            notice.info(
+              `restored workspace to before checkpoint #${seq} (new checkpoint #${res.restoredSeq} created)`
             )
             for (const item of res.plan) {
               process.stdout.write(`  ${item.action.toUpperCase()} ${item.path}\n`)
             }
           }
         } finally {
+          process.off('SIGINT', onSigint)
           releaseLease(db, thread.id)
+          if (sigintReceived) {
+            process.exit(130)
+          }
         }
       } catch (err) {
-        process.stderr.write(`[ant] error: ${err instanceof Error ? err.message : String(err)}\n`)
+        notice.error(err instanceof Error ? err.message : String(err))
         process.exitCode = 1
       } finally {
         db.close()

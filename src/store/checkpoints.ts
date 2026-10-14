@@ -1,7 +1,8 @@
 import type { Database } from 'bun:sqlite'
 import { existsSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
 import { atomicWrite, snapshot, type FileSnapshot } from '../tools/fs.ts'
+import { writeTx } from './tx.ts'
+import { resolveWithinRoot } from '../policy/paths.ts'
 
 export interface CheckpointFileRecord {
   path: string // cwd-relative POSIX
@@ -45,7 +46,7 @@ export function recordCheckpoint(
   }
 
   let assignedSeq = 0
-  db.transaction(() => {
+  writeTx(db, () => {
     // 1. Insert blobs idempotently inside the transaction
     for (const f of files) {
       if (f.before) {
@@ -79,17 +80,18 @@ export function recordCheckpoint(
 
     for (const f of files) {
       db.run(
-        'INSERT INTO checkpoint_files (checkpoint_id, path, before_hash, after_hash, mode) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO checkpoint_files (checkpoint_id, path, before_hash, after_hash, mode, before_mode) VALUES (?, ?, ?, ?, ?, ?)',
         [
           cpId,
           f.path,
           f.before?.hash ?? null,
           f.after?.hash ?? null,
           f.after?.mode ?? f.before?.mode ?? null,
+          f.before?.mode ?? null,
         ]
       )
     }
-  })()
+  })
 
   return assignedSeq
 }
@@ -213,7 +215,7 @@ export function restoreCheckpoint(
   const rows = db
     .query(
       `
-      SELECT c.seq, cf.path, cf.before_hash, cf.after_hash, cf.mode
+      SELECT c.seq, cf.path, cf.before_hash, cf.after_hash, cf.mode, cf.before_mode
       FROM checkpoints c
       JOIN checkpoint_files cf ON c.id = cf.checkpoint_id
       WHERE c.thread_id = ? AND c.seq >= ?
@@ -226,6 +228,7 @@ export function restoreCheckpoint(
     before_hash: string | null
     after_hash: string | null
     mode: number | null
+    before_mode: number | null
   }[]
 
   // Group by path
@@ -239,10 +242,13 @@ export function restoreCheckpoint(
   >()
 
   for (const r of rows) {
+    // Validate path containment against cwd
+    resolveWithinRoot(r.path, options.cwd)
+
     if (!pathsMap.has(r.path)) {
       pathsMap.set(r.path, {
         lowestBeforeHash: r.before_hash,
-        lowestMode: r.mode,
+        lowestMode: r.before_mode ?? r.mode,
         highestAfterHash: r.after_hash,
       })
     } else {
@@ -256,7 +262,7 @@ export function restoreCheckpoint(
   const conflicts: RestorePlanItem[] = []
 
   for (const [relPath, entry] of pathsMap.entries()) {
-    const absPath = join(options.cwd, relPath)
+    const absPath = resolveWithinRoot(relPath, options.cwd)
     const diskSnap = snapshot(absPath)
     const currentHash = diskSnap ? diskSnap.hash : null
     const expectedHash = entry.highestAfterHash
@@ -315,46 +321,51 @@ export function restoreCheckpoint(
     }
   }
 
-  // 7. Apply restoration to disk and capture snapshots for restore checkpoint
+  // 7. Apply restoration to disk and capture snapshots for restore checkpoint inside try/finally
   const restoreCheckpointFiles: CheckpointInputFile[] = []
+  let newSeq = 0
 
-  for (const item of plan) {
-    const absPath = join(options.cwd, item.path)
-    const beforeSnap = snapshot(absPath)
+  try {
+    for (const item of plan) {
+      const absPath = resolveWithinRoot(item.path, options.cwd)
+      const beforeSnap = snapshot(absPath)
 
-    if (item.action === 'delete') {
-      if (existsSync(absPath)) {
-        unlinkSync(absPath)
+      if (item.action === 'delete') {
+        if (existsSync(absPath)) {
+          unlinkSync(absPath)
+        }
+        restoreCheckpointFiles.push({
+          path: item.path,
+          before: beforeSnap,
+          after: null,
+        })
+      } else {
+        // Fetch blob
+        const blobRow = db
+          .query('SELECT data FROM blobs WHERE hash = ?')
+          .get(item.targetHash!) as { data: Buffer } | null
+
+        if (!blobRow) {
+          throw new Error(`Corrupted blob store: blob with hash ${item.targetHash} not found`)
+        }
+
+        const mode = pathsMap.get(item.path)?.lowestMode ?? 0o644
+        atomicWrite(absPath, blobRow.data, mode)
+        const afterSnap = snapshot(absPath)
+
+        restoreCheckpointFiles.push({
+          path: item.path,
+          before: beforeSnap,
+          after: afterSnap,
+        })
       }
-      restoreCheckpointFiles.push({
-        path: item.path,
-        before: beforeSnap,
-        after: null,
-      })
-    } else {
-      // Fetch blob
-      const blobRow = db
-        .query('SELECT data FROM blobs WHERE hash = ?')
-        .get(item.targetHash!) as { data: Buffer } | null
-
-      if (!blobRow) {
-        throw new Error(`Corrupted blob store: blob with hash ${item.targetHash} not found`)
-      }
-
-      const mode = pathsMap.get(item.path)?.lowestMode ?? 0o644
-      atomicWrite(absPath, blobRow.data, mode)
-      const afterSnap = snapshot(absPath)
-
-      restoreCheckpointFiles.push({
-        path: item.path,
-        before: beforeSnap,
-        after: afterSnap,
-      })
+    }
+  } finally {
+    // Record restore checkpoint for any applied files (even partial)
+    if (restoreCheckpointFiles.length > 0) {
+      newSeq = recordCheckpoint(db, threadId, 'restore', undefined, restoreCheckpointFiles)
     }
   }
-
-  // 7. Record restore checkpoint so the restoration itself can be undone
-  const newSeq = recordCheckpoint(db, threadId, 'restore', undefined, restoreCheckpointFiles)
 
   return {
     restoredSeq: newSeq,

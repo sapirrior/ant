@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 
 const MAX_TASK_BUFFER_CHARS = 1024 * 1024 // 1 MiB output cap
 
@@ -10,6 +11,10 @@ export interface ShellTask {
   status: 'running' | 'exited' | 'killed'
   exitCode: number | null
   signal: string | null
+  exited: boolean
+  stdinClosed?: boolean
+  escalationTimer?: ReturnType<typeof setTimeout>
+  hardTimer?: ReturnType<typeof setTimeout> | null
   buf: string
   droppedChars: number
   readCursor: number
@@ -32,22 +37,32 @@ export class TaskManagerRegistry {
   createTask(command: string, child: ChildProcess, initialBuffer = ''): ShellTask {
     this.counter++
     const id = `t${this.counter}`
+    const isExited = child.exitCode !== null || child.signalCode !== null
     const task: ShellTask = {
       id,
       command,
       child,
       startedAt: Date.now(),
-      status: 'running',
-      exitCode: null,
-      signal: null,
+      status: isExited ? 'exited' : 'running',
+      exitCode: child.exitCode,
+      signal: child.signalCode,
+      exited: isExited,
+      stdinClosed: false,
       buf: initialBuffer,
       droppedChars: 0,
       readCursor: 0,
       waiters: [],
     }
 
-    const appendOutput = (chunk: Buffer | string) => {
-      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8')
+    child.stdin?.on('error', () => {
+      task.stdinClosed = true
+    })
+
+    const stdoutDecoder = new StringDecoder('utf-8')
+    const stderrDecoder = new StringDecoder('utf-8')
+
+    const appendStdout = (chunk: Buffer | string) => {
+      const text = typeof chunk === 'string' ? chunk : stdoutDecoder.write(chunk)
       task.buf += text
       if (task.buf.length > MAX_TASK_BUFFER_CHARS) {
         const excess = task.buf.length - MAX_TASK_BUFFER_CHARS
@@ -61,10 +76,35 @@ export class TaskManagerRegistry {
       task.waiters = []
     }
 
-    child.stdout?.on('data', appendOutput)
-    child.stderr?.on('data', appendOutput)
+    const appendStderr = (chunk: Buffer | string) => {
+      const text = typeof chunk === 'string' ? chunk : stderrDecoder.write(chunk)
+      task.buf += text
+      if (task.buf.length > MAX_TASK_BUFFER_CHARS) {
+        const excess = task.buf.length - MAX_TASK_BUFFER_CHARS
+        task.droppedChars += excess
+        task.buf = task.buf.slice(excess)
+        task.readCursor = Math.max(0, task.readCursor - excess)
+      }
+      for (const w of task.waiters) {
+        w()
+      }
+      task.waiters = []
+    }
+
+    child.stdout?.on('data', appendStdout)
+    child.stderr?.on('data', appendStderr)
 
     child.on('close', (code, sig) => {
+      task.exited = true
+      task.stdinClosed = true
+      if (task.escalationTimer) {
+        clearTimeout(task.escalationTimer)
+        task.escalationTimer = undefined
+      }
+      if (task.hardTimer) {
+        clearTimeout(task.hardTimer)
+        task.hardTimer = null
+      }
       task.status = task.status === 'killed' ? 'killed' : 'exited'
       task.exitCode = code
       task.signal = sig
@@ -144,15 +184,19 @@ export class TaskManagerRegistry {
     if (!task) {
       throw new Error(`Task not found: "${id}"`)
     }
-    if (task.status !== 'running') {
-      throw new Error(`Cannot write to task "${id}": process is ${task.status}`)
-    }
-    if (!task.child.stdin || !task.child.stdin.writable) {
-      throw new Error(`Cannot write to task "${id}": stdin is not writable`)
+    if (task.exited || task.status !== 'running' || task.stdinClosed || !task.child.stdin || !task.child.stdin.writable || task.child.stdin.destroyed || task.child.stdin.writableEnded) {
+      throw new Error(`Cannot write to task "${id}": stdin is not writable or process has exited`)
     }
 
     const payload = newline ? `${input}\n` : input
-    task.child.stdin.write(payload)
+    try {
+      task.child.stdin.write(payload, (err) => {
+        if (err) task.stdinClosed = true
+      })
+    } catch {
+      task.stdinClosed = true
+      throw new Error(`Cannot write to task "${id}": stdin stream closed`)
+    }
   }
 
   stop(id: string, signal: 'SIGINT' | 'SIGTERM' | 'SIGKILL' = 'SIGTERM'): void {
@@ -160,7 +204,7 @@ export class TaskManagerRegistry {
     if (!task) {
       throw new Error(`Task not found: "${id}"`)
     }
-    if ((task.status !== 'running' && task.status !== 'killed') || !task.child.pid || task.child.exitCode !== null) {
+    if (task.exited || !task.child.pid || task.child.exitCode !== null || task.child.signalCode !== null) {
       return
     }
 
@@ -178,23 +222,26 @@ export class TaskManagerRegistry {
 
     // Auto-escalate to SIGKILL if SIGTERM doesn't kill within 3s
     if (signal === 'SIGTERM') {
-      const timer = setTimeout(() => {
-        if (task.child.pid && task.child.exitCode === null) {
+      if (task.escalationTimer) clearTimeout(task.escalationTimer)
+      task.escalationTimer = setTimeout(() => {
+        if (!task.exited && task.child.pid && task.child.exitCode === null && task.child.signalCode === null) {
           try {
             process.kill(-task.child.pid, 'SIGKILL')
           } catch {
-            // ignore
+            try {
+              task.child.kill('SIGKILL')
+            } catch {}
           }
         }
       }, 3000)
-      timer.unref()
+      task.escalationTimer.unref()
     }
   }
 
   async shutdown(graceMs = 3000): Promise<void> {
     const pendingTasks: ShellTask[] = []
     for (const task of this.tasks.values()) {
-      if (task.child.exitCode === null && task.child.pid) {
+      if (!task.exited && task.child.pid && task.child.exitCode === null && task.child.signalCode === null) {
         pendingTasks.push(task)
         this.stop(task.id, 'SIGTERM')
       }
@@ -203,17 +250,21 @@ export class TaskManagerRegistry {
     if (pendingTasks.length === 0) return
 
     const waitPromises = pendingTasks.map((task) => {
-      if (task.child.exitCode !== null) return Promise.resolve()
+      if (task.exited || task.child.exitCode !== null || task.child.signalCode !== null) {
+        return Promise.resolve()
+      }
       return new Promise<void>((resolve) => {
         const onExit = () => resolve()
         task.waiters.push(onExit)
       })
     })
 
-    await Promise.race([
-      Promise.all(waitPromises),
-      new Promise<void>((resolve) => setTimeout(resolve, graceMs)),
-    ])
+    const timeout = new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, graceMs)
+      t.unref()
+    })
+
+    await Promise.race([Promise.all(waitPromises), timeout])
 
     // Emergency kill any stubborn task
     this.killAll()
@@ -221,8 +272,16 @@ export class TaskManagerRegistry {
 
   killAll(): void {
     for (const task of this.tasks.values()) {
-      if (task.child.exitCode === null && task.child.pid) {
+      if (!task.exited && task.child.pid && task.child.exitCode === null && task.child.signalCode === null) {
         task.status = 'killed'
+        if (task.escalationTimer) {
+          clearTimeout(task.escalationTimer)
+          task.escalationTimer = undefined
+        }
+        if (task.hardTimer) {
+          clearTimeout(task.hardTimer)
+          task.hardTimer = null
+        }
         try {
           process.kill(-task.child.pid, 'SIGKILL')
         } catch {

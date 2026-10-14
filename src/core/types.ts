@@ -19,6 +19,7 @@ export type ReasoningEffort =
 export type Capability =
   | 'fs.read'
   | 'fs.write'
+  | 'fs.sensitive'
   | 'shell.run'
   | 'shell.destructive'
 
@@ -141,10 +142,7 @@ export interface ToolExecutionContext {
   readonly foregroundMs?: number
   readonly passEnv?: string[]
   readonly ui?: {
-    readonly confirm?: (opts: import('../output/tty.ts').ConfirmPromptOptions) => boolean
-    readonly ask?: (question: string) => string | null
-    readonly toolStart?: (name: string, description: string) => void
-    readonly toolEnd?: (name: string, summary: string, ok: boolean, durationMs: number) => void
+    readonly confirm?: (opts: import('../output/tty.ts').ConfirmPromptOptions) => boolean | Promise<boolean>
   }
   readonly onCheckpoint?: (
     tool: string,

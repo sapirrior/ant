@@ -1,10 +1,42 @@
-import { existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, closeSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { z } from 'zod'
+import { notice } from './output/notice.ts'
 
 import type { ReasoningEffort } from './core/types.ts'
 
 export type { ReasoningEffort }
+
+export const toolSettingsSchema = z.strictObject({
+  enabled: z.boolean().optional(),
+  foregroundMs: z.number().int().positive().optional(),
+  passEnv: z.array(z.string()).optional(),
+})
+
+export const settingsSchema = z.object({
+  model: z.string().optional(),
+  maxSteps: z.number().int().min(1).optional(),
+  timeout: z.union([z.string(), z.number().int().min(0)]).optional(),
+  retries: z.number().int().min(0).optional(),
+  streamRetries: z.number().int().min(0).optional(),
+  output: z.enum(['text', 'md', 'json', 'stream-json']).optional(),
+  reasoning: z.enum(['none', 'low', 'medium', 'high', 'max']).optional(),
+  effort: z.enum(['none', 'low', 'medium', 'high', 'max']).optional(),
+  logLevel: z.enum(['error', 'info', 'debug']).optional(),
+  theme: z.enum(['auto', 'dark', 'light', 'ansi']).optional(),
+  allow: z.strictObject({
+    read: z.boolean().optional(),
+    edit: z.boolean().optional(),
+    bash: z.boolean().optional(),
+    destructiveBash: z.boolean().optional(),
+    sensitive: z.boolean().optional(),
+    mcp: z.array(z.string()).optional(),
+  }).optional(),
+  deny: z.strictObject({
+    mcp: z.array(z.string()).optional(),
+  }).optional(),
+  tools: z.record(z.string(), toolSettingsSchema).optional(),
+})
 
 export interface ToolSettings {
   enabled?: boolean
@@ -27,6 +59,7 @@ export interface Settings {
     edit?: boolean
     bash?: boolean
     destructiveBash?: boolean
+    sensitive?: boolean
     mcp?: string[]
   }
   deny?: {
@@ -71,7 +104,11 @@ export const DEFAULT_SETTINGS: Settings = {
 export function parseDurationMs(durationStr: string): number {
   const trimmed = durationStr.trim().toLowerCase()
   if (/^\d+$/.test(trimmed)) {
-    return Number.parseInt(trimmed, 10)
+    const ms = Number.parseInt(trimmed, 10)
+    if (ms > 0 && ms < 1000) {
+      throw new Error(`Timeout "${durationStr}" is less than 1000ms. Did you mean "${durationStr}s"? Use "0" for no timeout.`)
+    }
+    return ms
   }
 
   const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)$/)
@@ -96,9 +133,8 @@ export function parseDurationMs(durationStr: string): number {
   }
 }
 
-export function getAntHome(): string {
-  return process.env.ANT_HOME ?? join(homedir(), '.ant')
-}
+export { getAntHome } from './paths.ts'
+import { getAntHome } from './paths.ts'
 
 export function getSettingsPath(): string {
   return join(getAntHome(), 'settings.json')
@@ -108,86 +144,7 @@ export function getSettingsLockPath(): string {
   return join(getAntHome(), 'settings.json.lock')
 }
 
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err: unknown) {
-    if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EPERM') {
-      return true
-    }
-    return false
-  }
-}
-
-export async function withFileLock<T>(lockPath: string, fn: () => T | Promise<T>): Promise<T> {
-  const maxWaitMs = 5000
-  const retryIntervalMs = 50
-  const staleAgeMs = 30000
-  const startTime = Date.now()
-  const dir = dirname(lockPath)
-  mkdirSync(dir, { recursive: true })
-
-  const token = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  let acquired = false
-
-  while (true) {
-    try {
-      const fd = openSync(lockPath, 'wx')
-      writeFileSync(fd, `${token}\n${process.pid}\n${Date.now()}`, 'utf-8')
-      closeSync(fd)
-      acquired = true
-      break
-    } catch (err: unknown) {
-      if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EEXIST') {
-        // Check if stale
-        try {
-          const content = readFileSync(lockPath, 'utf-8')
-          const lines = content.trim().split('\n')
-          // If empty file was just created, don't immediately treat as stale
-          if (lines.length >= 2) {
-            const pid = lines[1] ? Number.parseInt(lines[1], 10) : 0
-            const lockTime = lines[2] ? Number.parseInt(lines[2], 10) : 0
-            const age = Date.now() - lockTime
-
-            if (age > staleAgeMs || (pid > 0 && !pidAlive(pid))) {
-              try {
-                unlinkSync(lockPath)
-                continue
-              } catch {
-                // ignore
-              }
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        if (Date.now() - startTime > maxWaitMs) {
-          throw new Error(`Timeout waiting for settings lock (${lockPath}) after ${maxWaitMs}ms`)
-        }
-        await new Promise((resolve) => setTimeout(resolve, retryIntervalMs))
-      } else {
-        throw err
-      }
-    }
-  }
-
-  try {
-    return await fn()
-  } finally {
-    if (acquired) {
-      try {
-        const content = readFileSync(lockPath, 'utf-8')
-        if (content.startsWith(token)) {
-          unlinkSync(lockPath)
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-}
+export { withFileLock } from './utils/fileLock.ts'
 
 export const KNOWN_TOP_KEYS = new Set([
   ...Object.keys(DEFAULT_SETTINGS),
@@ -224,7 +181,7 @@ export function loadSettings(options?: LoadSettingsOptions): Settings {
     throw new Error(`Settings file at ${path} must contain a JSON object.`)
   }
 
-  const warnFn = options?.warn ?? ((msg: string) => process.stderr.write(`[ant] warning: ${msg}\n`))
+  const warnFn = options?.warn ?? ((msg: string) => notice.warning(msg))
 
   for (const k of Object.keys(parsed)) {
     if (!KNOWN_TOP_KEYS.has(k)) {
@@ -232,7 +189,34 @@ export function loadSettings(options?: LoadSettingsOptions): Settings {
     }
   }
 
-  return parsed as Settings
+  const validation = settingsSchema.safeParse(parsed)
+  if (!validation.success) {
+    const issue = validation.error.issues[0]
+    const pathStr = issue?.path.join('.') || 'root'
+    throw new Error(`Invalid settings in ${path}: "${pathStr}" ${issue?.message}`)
+  }
+
+  const validated = validation.data as Settings
+  if (validation.data.effort && !validated.reasoning) {
+    validated.reasoning = validation.data.effort
+  }
+
+  return {
+    ...DEFAULT_SETTINGS,
+    ...validated,
+    allow: {
+      ...DEFAULT_SETTINGS.allow,
+      ...validated.allow,
+    },
+    deny: {
+      ...DEFAULT_SETTINGS.deny,
+      ...validated.deny,
+    },
+    tools: {
+      ...DEFAULT_SETTINGS.tools,
+      ...validated.tools,
+    },
+  }
 }
 
 export function saveSettings(settings: Settings): void {
@@ -241,8 +225,15 @@ export function saveSettings(settings: Settings): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
 
   const tmpPath = `${path}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
-  writeFileSync(tmpPath, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 })
-  renameSync(tmpPath, path)
+  try {
+    writeFileSync(tmpPath, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 })
+    renameSync(tmpPath, path)
+  } catch (err) {
+    try {
+      if (existsSync(tmpPath)) unlinkSync(tmpPath)
+    } catch {}
+    throw err
+  }
 }
 
 // Key parsing & management
@@ -461,6 +452,19 @@ export const KEYS: Record<string, KeyDefinition> = {
       if (s.allow) delete s.allow.destructiveBash
     },
   },
+  'allow.sensitive': {
+    key: 'allow.sensitive',
+    describe: 'Allow reading sensitive files by default (true/false)',
+    parse: (v) => parseBool(v, 'allow.sensitive'),
+    get: (s) => s.allow?.sensitive,
+    set: (s, v) => {
+      s.allow = s.allow ?? {}
+      s.allow.sensitive = v as boolean
+    },
+    unset: (s) => {
+      if (s.allow) delete s.allow.sensitive
+    },
+  },
   'allow.mcp': {
     key: 'allow.mcp',
     describe: 'Pre-allowed MCP tools list/patterns (comma-separated or JSON array)',
@@ -541,6 +545,7 @@ const KNOWN_TOOLS = [
   'TaskManager',
   'WebSearch',
   'WebFetch',
+  'McpTool',
 ]
 
 for (const t of KNOWN_TOOLS) {

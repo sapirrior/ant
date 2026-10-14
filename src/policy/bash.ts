@@ -328,6 +328,10 @@ function checkPathArgument(arg: string, cwd: string): { ok: boolean; reason?: st
     return { ok: false, reason: `reads sensitive file "${arg}"` }
   }
 
+  if (/[*?[{]/.test(arg)) {
+    return { ok: false, reason: `path contains glob pattern "${arg}"` }
+  }
+
   if (arg.startsWith('~') || arg.startsWith('$') || isAbsolute(arg) || arg.includes('..')) {
     let resolved: string
     if (arg.startsWith('~')) {
@@ -355,8 +359,8 @@ function classifyPipelineSegment(segment: string, cwd: string): BashVerdict {
     return { status: 'blocked', reason: 'fork-bomb pattern' }
   }
 
-  // Check subshell substitutions
-  if (/\$\(/.test(trimmed) || /`[^`]+`/.test(trimmed)) {
+  // Check subshell substitutions and process substitutions <(...) / >(...)
+  if (/\$\(/.test(trimmed) || /`[^`]+`/.test(trimmed) || /(^|[^'"\\])[<>]\(/.test(trimmed)) {
     return { status: 'ask', reason: 'contains command substitution' }
   }
 
@@ -368,14 +372,19 @@ function classifyPipelineSegment(segment: string, cwd: string): BashVerdict {
     return { status: 'blocked', reason: 'device write redirection' }
   }
 
+  // Strip harmless redirection forms: e.g. 2>&1, 1>&2, 2>/dev/null, >/dev/null, &>/dev/null
   const cleanRedirect = strippedQuotes
-    .replace(/>\s*\/dev\/null/g, '')
-    .replace(/2>\s*\/dev\/null/g, '')
-    .replace(/2>&1/g, '')
-    .replace(/1>&2/g, '')
+    .replace(/\d*>&\s*\d+/g, '')
+    .replace(/\d*>\s*\/dev\/null/g, '')
+    .replace(/&>\s*\/dev\/null/g, '')
 
-  if (/>>|(?<![12])>|>[|]|&>/.test(cleanRedirect)) {
+  if (/>|>>|&>|>\|/.test(cleanRedirect)) {
     return { status: 'ask', reason: 'file output redirection' }
+  }
+
+  // Sensitive input redirection
+  if (/<\s*\S*\.env/i.test(strippedQuotes)) {
+    return { status: 'ask', reason: 'sensitive input redirection' }
   }
 
   const { tokens, unterminated } = tokenizeCommandLine(trimmed)

@@ -1,13 +1,11 @@
 import { existsSync, statSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { relative } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
-import { resolveWithinRoot } from '../../policy/paths.ts'
+import { relToRoot, resolveWithinRoot } from '../../policy/paths.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { EDIT_FILE_DESCRIPTION } from './prompt.ts'
-import { atomicWrite, snapshot, MAX_CHECKPOINT_BYTES } from '../fs.ts'
+import { atomicWrite, snapshot, snapshotFromBuffer, MAX_CHECKPOINT_BYTES } from '../fs.ts'
 
 export const editFileInputSchema = z.object({
   path: z.string().describe('The path of the file to edit (relative or absolute).'),
@@ -15,12 +13,6 @@ export const editFileInputSchema = z.object({
   newContent: z.string().describe('The new content to replace oldContent with.'),
   replaceAll: z.boolean().default(false).describe('If true, replace all occurrences. If false, oldContent must be unique.'),
 })
-
-function detectLineEnding(content: string): '\r\n' | '\n' {
-  const crlfCount = (content.match(/\r\n/g) || []).length
-  const lfCount = (content.match(/[^\r]\n/g) || []).length
-  return crlfCount > lfCount ? '\r\n' : '\n'
-}
 
 function normalizeNewlines(text: string): string {
   return text.replace(/\r\n/g, '\n')
@@ -30,10 +22,11 @@ export function createEditFileTool(context: ToolExecutionContext) {
   return tool({
     description: EDIT_FILE_DESCRIPTION,
     inputSchema: editFileInputSchema,
-    execute: async (input) => {
-      return executeWithPolicy('EditFile', input, context, async ({ path, oldContent, newContent, replaceAll }) => {
+    execute: async (input, { toolCallId }: { toolCallId?: string } = {}) => {
+      const execContext = toolCallId ? { ...context, toolCallId } : context
+      return executeWithPolicy('EditFile', input, execContext, async ({ path, oldContent, newContent, replaceAll }) => {
         const fullPath = resolveWithinRoot(path, context.cwd)
-        const relPath = relative(context.cwd, fullPath).replace(/\\/g, '/')
+        const relPath = relToRoot(context.cwd, fullPath)
 
         // 1. Precondition checks
         if (!existsSync(fullPath)) {
@@ -53,10 +46,14 @@ export function createEditFileTool(context: ToolExecutionContext) {
           throw new Error(`No changes to make: "oldContent" and "newContent" are identical.`)
         }
 
-        // 2. Snapshot BEFORE mutation
+        // 2. Snapshot BEFORE mutation (single read: avoid TOCTOU)
         const before = snapshot(fullPath)
         if (!before) {
           throw new Error(`File not found: ${path}`)
+        }
+
+        if (before.data.includes(0)) {
+          throw new Error(`Cannot edit binary file "${path}".`)
         }
 
         // 3. CAS #1 Guard: Read-before-write check
@@ -67,57 +64,77 @@ export function createEditFileTool(context: ToolExecutionContext) {
           }
         }
 
-        // 4. Read and normalize line endings for matching
-        const rawContent = await readFile(fullPath, 'utf-8')
-        const originalLineEnding = detectLineEnding(rawContent)
+        // 4. Line ending handling and replacement
+        const rawContent = before.data.toString('utf-8')
+        const crlf = (rawContent.match(/\r\n/g) || []).length
+        const totalNewlines = (rawContent.match(/\n/g) || []).length
+        const lf = totalNewlines - crlf
+        const dominantEnding: '\r\n' | '\n' = crlf > lf ? '\r\n' : '\n'
 
-        const normalizedContent = normalizeNewlines(rawContent)
-        const normalizedOld = normalizeNewlines(oldContent)
-        const normalizedNew = normalizeNewlines(newContent)
+        let finalContent: string
+        let occurrences = 0
 
-        const occurrences = normalizedContent.split(normalizedOld).length - 1
+        // In mixed-line-ending files, try exact raw matching first to avoid normalizing untouched parts
+        if (crlf > 0 && lf > 0) {
+          const rawOccurrences = rawContent.split(oldContent).length - 1
+          if (rawOccurrences === 1 || (replaceAll && rawOccurrences > 0)) {
+            occurrences = rawOccurrences
+            finalContent = replaceAll
+              ? rawContent.split(oldContent).join(newContent)
+              : rawContent.replace(oldContent, () => newContent)
+          }
+        }
 
+        // Standard normalized replacement
         if (occurrences === 0) {
-          throw new Error(
-            `Failed to edit ${path}: "oldContent" was not found in the file. ` +
-            `Ensure exact character matching including indentation and whitespace.`
-          )
-        }
+          const normalizedContent = normalizeNewlines(rawContent)
+          const normalizedOld = normalizeNewlines(oldContent)
+          const normalizedNew = normalizeNewlines(newContent)
 
-        if (!replaceAll && occurrences > 1) {
-          throw new Error(
-            `Failed to edit ${path}: "oldContent" matched ${occurrences} times. ` +
-            `Set replaceAll: true or include more surrounding lines to create a unique match.`
-          )
-        }
+          occurrences = normalizedContent.split(normalizedOld).length - 1
 
-        // 5. Perform replacement
-        let updatedNormalized: string
-        if (replaceAll) {
-          updatedNormalized = normalizedContent.split(normalizedOld).join(normalizedNew)
-        } else {
-          updatedNormalized = normalizedContent.replace(normalizedOld, () => normalizedNew)
-        }
+          if (occurrences === 0) {
+            throw new Error(
+              `Failed to edit ${path}: "oldContent" was not found in the file. ` +
+              `Ensure exact character matching including indentation and whitespace.`
+            )
+          }
 
-        // 6. Restore original line endings
-        const finalContent =
-          originalLineEnding === '\r\n'
+          if (!replaceAll && occurrences > 1) {
+            throw new Error(
+              `Failed to edit ${path}: "oldContent" matched ${occurrences} times. ` +
+              `Set replaceAll: true or include more surrounding lines to create a unique match.`
+            )
+          }
+
+          const updatedNormalized = replaceAll
+            ? normalizedContent.split(normalizedOld).join(normalizedNew)
+            : normalizedContent.replace(normalizedOld, () => normalizedNew)
+
+          finalContent = dominantEnding === '\r\n'
             ? updatedNormalized.replace(/\n/g, '\r\n')
             : updatedNormalized
+        }
 
-        // 7. Atomic write
-        atomicWrite(fullPath, finalContent, before.mode)
+        // 5. Pre-check write size
+        const finalBuf = Buffer.from(finalContent!, 'utf-8')
+        if (finalBuf.length > MAX_CHECKPOINT_BYTES) {
+          throw new Error(`File "${path}" exceeds maximum snapshot limit of 20 MiB after edit. Mutation refused.`)
+        }
 
-        // 8. Snapshot AFTER mutation
-        const after = snapshot(fullPath)
-        if (after && context.readState) {
+        // 6. Atomic write
+        atomicWrite(fullPath, finalBuf, before.mode)
+
+        // 7. Snapshot AFTER mutation
+        const after = snapshotFromBuffer(finalBuf, before.mode)
+        if (context.readState) {
           context.readState.set(relPath, after.hash)
         }
 
-        // 9. Record checkpoint
+        // 8. Record checkpoint
         let checkpointSeq: number | undefined
-        if (context.onCheckpoint) {
-          checkpointSeq = context.onCheckpoint('EditFile', context.toolCallId, [
+        if (execContext.onCheckpoint) {
+          checkpointSeq = execContext.onCheckpoint('EditFile', execContext.toolCallId, [
             { path: relPath, before, after },
           ])
         }

@@ -1,5 +1,17 @@
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import {
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
 export const MAX_CHECKPOINT_BYTES = 20 * 1024 * 1024 // 20 MiB
@@ -14,6 +26,15 @@ export interface FileSnapshot {
 export function computeHash(content: Buffer | string): string {
   const buf = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf-8')
   return createHash('sha256').update(buf).digest('hex')
+}
+
+export function snapshotFromBuffer(buffer: Buffer, mode?: number): FileSnapshot {
+  return {
+    hash: computeHash(buffer),
+    size: buffer.length,
+    data: buffer,
+    mode: (mode ?? 0o644) & 0o777,
+  }
 }
 
 export function snapshot(absPath: string): FileSnapshot | null {
@@ -43,10 +64,29 @@ export function atomicWrite(absPath: string, content: Buffer | string, mode?: nu
   const dir = dirname(absPath)
   mkdirSync(dir, { recursive: true })
 
-  const tmpPath = join(dir, `.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`)
+  const suffix = randomBytes(6).toString('hex')
+  const tmpPath = join(dir, `.tmp.${Date.now()}.${suffix}`)
   const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf-8')
-  const fileMode = mode ?? 0o644
+  const fileMode = (mode ?? 0o644) & 0o777
 
-  writeFileSync(tmpPath, buffer, { mode: fileMode })
-  renameSync(tmpPath, absPath)
+  let fd: number | null = null
+  try {
+    fd = openSync(tmpPath, 'wx', fileMode)
+    writeSync(fd, buffer)
+    fsyncSync(fd)
+    fchmodSync(fd, fileMode)
+    closeSync(fd)
+    fd = null
+    renameSync(tmpPath, absPath)
+  } catch (err) {
+    if (fd !== null) {
+      try {
+        closeSync(fd)
+      } catch {}
+    }
+    try {
+      unlinkSync(tmpPath)
+    } catch {}
+    throw err
+  }
 }

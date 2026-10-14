@@ -5,6 +5,7 @@ import {
   formatTokens,
   getSymbols,
   type ColorLevel,
+  type ThemeMode,
 } from './color.ts'
 
 const LOG_PRIORITY: Record<LogLevel, number> = {
@@ -41,9 +42,10 @@ export class StderrLogger {
 
   constructor(
     private readonly level: LogLevel = 'info',
-    colorLevel?: ColorLevel
+    colorLevel?: ColorLevel,
+    theme?: ThemeMode
   ) {
-    this.fmt = createColorFormatter(colorLevel)
+    this.fmt = createColorFormatter(colorLevel, theme)
     this.sym = getSymbols()
   }
 

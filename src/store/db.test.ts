@@ -44,7 +44,7 @@ describe('database store', () => {
       expect(foreignKeys.foreign_keys).toBe(1)
 
       const userVersion = db.query('PRAGMA user_version;').get() as { user_version: number }
-      expect(userVersion.user_version).toBe(2)
+      expect(userVersion.user_version).toBe(3)
     } finally {
       db.close()
     }
@@ -81,13 +81,14 @@ describe('database store', () => {
     const upgraded = openDb(dbPath)
     try {
       const row = upgraded.query('PRAGMA user_version;').get() as { user_version: number }
-      expect(row.user_version).toBe(2)
+      expect(row.user_version).toBe(3)
 
-      // Verify columns last_status and last_exit_code exist
+      // Verify columns last_status, last_exit_code, lock_host exist
       const threadInfo = upgraded.query("PRAGMA table_info('threads');").all() as { name: string }[]
       const colNames = threadInfo.map((c) => c.name)
       expect(colNames).toContain('last_status')
       expect(colNames).toContain('last_exit_code')
+      expect(colNames).toContain('lock_host')
     } finally {
       upgraded.close()
     }
@@ -136,11 +137,14 @@ describe('database store', () => {
       const rowAfterRelease = db.query('SELECT lock_pid FROM threads WHERE id = ?').get(thread.id) as { lock_pid: number | null }
       expect(rowAfterRelease.lock_pid).toBeNull()
 
-      // 5. Active lease by another live process rejects acquisition
-      // Use process.ppid which is guaranteed to be a live parent process (bun / shell)
+      // 5. Active lease by another live process rejects acquisition when fresh
       if (process.ppid && pidAlive(process.ppid)) {
-        db.run('UPDATE threads SET lock_pid = ?, lock_at = ? WHERE id = ?', [process.ppid, 1000000, thread.id])
+        db.run('UPDATE threads SET lock_pid = ?, lock_at = ? WHERE id = ?', [process.ppid, Date.now(), thread.id])
         expect(() => acquireLease(db, thread.id)).toThrow(new RegExp(`thread ${thread.id} is in use by pid ${process.ppid}`))
+
+        // Stale lease with old lock_at (>30s) can be taken over even if pid is alive (B-009)
+        db.run('UPDATE threads SET lock_pid = ?, lock_at = ? WHERE id = ?', [process.ppid, Date.now() - 40000, thread.id])
+        expect(() => acquireLease(db, thread.id)).not.toThrow()
       }
     } finally {
       db.close()

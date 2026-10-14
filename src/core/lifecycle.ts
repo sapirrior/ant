@@ -1,4 +1,5 @@
 import type { AbortReason } from './signals.ts'
+import { notice } from '../output/notice.ts'
 
 export const SHUTDOWN_GRACE_MS = 8000
 
@@ -8,6 +9,7 @@ export type SyncCleanupCallback = () => void
 export interface Lifecycle {
   readonly controller: AbortController
   readonly signal: AbortSignal
+  requestAbort(reason: AbortReason, exitCode?: number): void
   onCleanup(fn: CleanupCallback): () => void
   onEmergencyCleanup(fn: SyncCleanupCallback): () => void
   dispose(): void
@@ -41,6 +43,26 @@ export function createLifecycle(options?: {
     }
   }
 
+  const drainAndExit = (exitCode: number) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      process.exit(exitCode)
+    }
+    const timer = setTimeout(finish, 200)
+    timer.unref()
+    try {
+      process.stdout.write('', () => {
+        clearTimeout(timer)
+        finish()
+      })
+    } catch {
+      clearTimeout(timer)
+      finish()
+    }
+  }
+
   const handleSignal = (reason: AbortReason, exitCode: number) => {
     if (isDisposed) return
 
@@ -51,40 +73,46 @@ export function createLifecycle(options?: {
       // Start grace timer for shutdown
       graceTimer = setTimeout(() => {
         runEmergencyCleanup()
-        process.exit(exitCode)
+        drainAndExit(exitCode)
       }, graceMs)
       graceTimer.unref()
     } else {
       // Second signal: immediate forced exit
       if (graceTimer) clearTimeout(graceTimer)
       runEmergencyCleanup()
-      process.exit(exitCode)
+      drainAndExit(exitCode)
     }
   }
 
   const onSigint = () => handleSignal('SIGINT', 130)
   const onSigterm = () => handleSignal('SIGTERM', 143)
   const onSighup = () => handleSignal('SIGHUP', 129)
+  const onStdoutError = (err: any) => {
+    if (err?.code === 'EPIPE') {
+      handleSignal('SIGPIPE' as any, 141)
+    }
+  }
 
   const onUncaughtException = (err: unknown) => {
     if (isDisposed) return
     options?.onError?.(err)
-    process.stderr.write(`[ant] uncaught exception: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`)
+    notice.error(`uncaught exception: ${err instanceof Error ? err.stack ?? err.message : String(err)}`)
     runEmergencyCleanup()
-    process.exit(5)
+    drainAndExit(5)
   }
 
   const onUnhandledRejection = (reason: unknown) => {
     if (isDisposed) return
     options?.onError?.(reason)
-    process.stderr.write(`[ant] unhandled rejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}\n`)
+    notice.error(`unhandled rejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`)
     runEmergencyCleanup()
-    process.exit(5)
+    drainAndExit(5)
   }
 
   process.on('SIGINT', onSigint)
   process.on('SIGTERM', onSigterm)
   process.on('SIGHUP', onSighup)
+  process.stdout.on('error', onStdoutError)
   process.on('uncaughtException', onUncaughtException)
   process.on('unhandledRejection', onUnhandledRejection)
 
@@ -111,6 +139,7 @@ export function createLifecycle(options?: {
     process.off('SIGINT', onSigint)
     process.off('SIGTERM', onSigterm)
     process.off('SIGHUP', onSighup)
+    process.stdout.off('error', onStdoutError)
     process.off('uncaughtException', onUncaughtException)
     process.off('unhandledRejection', onUnhandledRejection)
   }
@@ -118,6 +147,9 @@ export function createLifecycle(options?: {
   return {
     controller,
     signal: controller.signal,
+    requestAbort(reason: AbortReason, exitCode = 4) {
+      handleSignal(reason, exitCode)
+    },
     onCleanup(fn: CleanupCallback) {
       cleanups.push(fn)
       return () => {

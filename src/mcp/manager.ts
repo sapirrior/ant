@@ -43,6 +43,7 @@ function buildCleanSubprocessEnv(
 export class McpClientManager {
   private readonly cwd: string
   private readonly activeClients = new Map<string, MCPClient>()
+  private readonly clientPromises = new Map<string, Promise<MCPClient>>()
   private cachedServers: Map<string, ResolvedMcpServer> | null = null
 
   constructor(options: McpManagerOptions = {}) {
@@ -75,6 +76,11 @@ export class McpClientManager {
       return existing
     }
 
+    const pending = this.clientPromises.get(serverName)
+    if (pending) {
+      return pending
+    }
+
     const servers = this.getServers()
     const resolved = servers.get(serverName)
     if (!resolved) {
@@ -85,44 +91,58 @@ export class McpClientManager {
       throw new Error(`MCP server "${serverName}" is currently disabled.`)
     }
 
-    const config = resolved.config
-    let client: MCPClient
+    const connectPromise = (async () => {
+      const config = resolved.config
+      let client: MCPClient
 
-    try {
-      if (config.transport === 'stdio') {
-        const env = buildCleanSubprocessEnv(config.env ?? {})
-        const cwd = config.cwd ?? this.cwd
-        const transport = new Experimental_StdioMCPTransport({
-          command: config.command,
-          args: config.args ? [...config.args] : [],
-          env,
-          cwd,
-        })
-        client = await createMCPClient({ transport })
-      } else {
-        const headers: Record<string, string> = {}
-        if (config.headers) {
-          for (const [k, v] of Object.entries(config.headers)) {
-            // Expand environment variables like ${FOO_TOKEN}
-            headers[k] = v.replace(/\$\{([^}]+)\}/g, (_, envVar) => process.env[envVar] ?? '')
+      try {
+        if (config.transport === 'stdio') {
+          const env = buildCleanSubprocessEnv(config.env ?? {})
+          const cwd = config.cwd ?? this.cwd
+          const transport = new Experimental_StdioMCPTransport({
+            command: config.command,
+            args: config.args ? [...config.args] : [],
+            env,
+            cwd,
+          })
+          client = await createMCPClient({ transport })
+        } else {
+          const headers: Record<string, string> = {}
+          if (config.headers) {
+            for (const [k, v] of Object.entries(config.headers)) {
+              // Expand environment variables only for global-scoped servers
+              if (resolved.scope === 'global') {
+                headers[k] = v.replace(/\$\{([^}]+)\}/g, (_, envVar) => process.env[envVar] ?? '')
+              } else {
+                headers[k] = v
+              }
+            }
           }
+
+          client = await createMCPClient({
+            transport: {
+              type: config.transport === 'sse' ? 'sse' : 'http',
+              url: config.url,
+              headers,
+            },
+          })
         }
-
-        client = await createMCPClient({
-          transport: {
-            type: config.transport === 'sse' ? 'sse' : 'http',
-            url: config.url,
-            headers,
-          },
-        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new Error(`Failed to connect to MCP server "${serverName}": ${msg}`)
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      throw new Error(`Failed to connect to MCP server "${serverName}": ${msg}`)
-    }
 
-    this.activeClients.set(serverName, client)
-    return client
+      this.activeClients.set(serverName, client)
+      return client
+    })()
+
+    this.clientPromises.set(serverName, connectPromise)
+    try {
+      return await connectPromise
+    } catch (err) {
+      this.clientPromises.delete(serverName)
+      throw err
+    }
   }
 
   /**
@@ -202,6 +222,7 @@ export class McpClientManager {
       )
     }
     this.activeClients.clear()
+    this.clientPromises.clear()
     await Promise.all(promises)
   }
 
@@ -215,5 +236,6 @@ export class McpClientManager {
       } catch {}
     }
     this.activeClients.clear()
+    this.clientPromises.clear()
   }
 }

@@ -1,9 +1,8 @@
-import { existsSync, statSync } from 'node:fs'
-import { unlink } from 'node:fs/promises'
-import { relative } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
-import { resolveWithinRoot } from '../../policy/paths.ts'
+import { existsSync, statSync } from 'node:fs'
+import { unlink } from 'node:fs/promises'
+import { relToRoot, resolveWithinRoot } from '../../policy/paths.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { DELETE_FILE_DESCRIPTION } from './prompt.ts'
@@ -17,10 +16,11 @@ export function createDeleteFileTool(context: ToolExecutionContext) {
   return tool({
     description: DELETE_FILE_DESCRIPTION,
     inputSchema: deleteFileInputSchema,
-    execute: async (input) => {
-      return executeWithPolicy('DeleteFile', input, context, async ({ path }) => {
+    execute: async (input, { toolCallId }: { toolCallId?: string } = {}) => {
+      const execContext = toolCallId ? { ...context, toolCallId } : context
+      return executeWithPolicy('DeleteFile', input, execContext, async ({ path }) => {
         const fullPath = resolveWithinRoot(path, context.cwd)
-        const relPath = relative(context.cwd, fullPath).replace(/\\/g, '/')
+        const relPath = relToRoot(context.cwd, fullPath)
 
         if (!existsSync(fullPath)) {
           throw new Error(`File not found: ${path}`)
@@ -44,8 +44,8 @@ export function createDeleteFileTool(context: ToolExecutionContext) {
 
         // 4. Record checkpoint
         let checkpointSeq: number | undefined
-        if (context.onCheckpoint) {
-          checkpointSeq = context.onCheckpoint('DeleteFile', context.toolCallId, [
+        if (execContext.onCheckpoint) {
+          checkpointSeq = execContext.onCheckpoint('DeleteFile', execContext.toolCallId, [
             { path: relPath, before, after: null },
           ])
         }

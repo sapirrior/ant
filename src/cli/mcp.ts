@@ -9,6 +9,7 @@ import {
 } from '../mcp/config.ts'
 import type { McpScope, McpServerConfig } from '../mcp/types.ts'
 import { createColorFormatter } from '../output/color.ts'
+import { notice } from '../output/notice.ts'
 
 export function registerMcpCommand(program: Command): void {
   const mcpCmd = program
@@ -140,7 +141,7 @@ export function registerMcpCommand(program: Command): void {
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`[ant] error: ${msg}\n`)
+        notice.error(msg)
         process.exitCode = 2
       }
     })
@@ -157,7 +158,7 @@ export function registerMcpCommand(program: Command): void {
         const scope: McpScope = options.global ? 'global' : 'project'
         const removed = await removeMcpServer(scope, name, process.cwd())
         if (!removed) {
-          process.stderr.write(`[ant] error: MCP server "${name}" not found in ${scope} configuration.\n`)
+          notice.error(`MCP server "${name}" not found in ${scope} configuration.`)
           process.exitCode = 2
           return
         }
@@ -166,7 +167,7 @@ export function registerMcpCommand(program: Command): void {
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`[ant] error: ${msg}\n`)
+        notice.error(msg)
         process.exitCode = 2
       }
     })
@@ -182,7 +183,7 @@ export function registerMcpCommand(program: Command): void {
         const scope: McpScope = options.global ? 'global' : 'project'
         const updated = await setMcpServerEnabled(scope, name, true, process.cwd())
         if (!updated) {
-          process.stderr.write(`[ant] error: MCP server "${name}" not found in ${scope} configuration.\n`)
+          notice.error(`MCP server "${name}" not found in ${scope} configuration.`)
           process.exitCode = 2
           return
         }
@@ -190,7 +191,7 @@ export function registerMcpCommand(program: Command): void {
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`[ant] error: ${msg}\n`)
+        notice.error(msg)
         process.exitCode = 2
       }
     })
@@ -206,7 +207,7 @@ export function registerMcpCommand(program: Command): void {
         const scope: McpScope = options.global ? 'global' : 'project'
         const updated = await setMcpServerEnabled(scope, name, false, process.cwd())
         if (!updated) {
-          process.stderr.write(`[ant] error: MCP server "${name}" not found in ${scope} configuration.\n`)
+          notice.error(`MCP server "${name}" not found in ${scope} configuration.`)
           process.exitCode = 2
           return
         }
@@ -214,7 +215,7 @@ export function registerMcpCommand(program: Command): void {
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`[ant] error: ${msg}\n`)
+        notice.error(msg)
         process.exitCode = 2
       }
     })

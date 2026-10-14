@@ -8,6 +8,7 @@ import {
   KEYS,
   type Settings,
 } from '../settings.ts'
+import { notice } from '../output/notice.ts'
 
 export function registerConfigCommand(program: Command): void {
   const configCmd = program
@@ -34,7 +35,7 @@ export function registerConfigCommand(program: Command): void {
     .action((key: string) => {
       const keyDef = KEYS[key]
       if (!keyDef) {
-        process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
+        notice.error(`Unknown setting "${key}".`)
         process.exitCode = 2
         return
       }
@@ -42,7 +43,9 @@ export function registerConfigCommand(program: Command): void {
       const current = loadSettings()
       const val = keyDef.get(current)
       if (val === undefined) {
-        process.stderr.write(`[ant] Setting "${key}" is not set.\n`)
+        notice.info(`Setting "${key}" is not set.`)
+        process.exitCode = 1
+        return
       } else if (typeof val === 'object' && val !== null) {
         process.stdout.write(`${JSON.stringify(val, null, 2)}\n`)
       } else {
@@ -57,7 +60,7 @@ export function registerConfigCommand(program: Command): void {
     .action(async (key: string, value: string) => {
       const keyDef = KEYS[key]
       if (!keyDef) {
-        process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
+        notice.error(`Unknown setting "${key}".`)
         process.exitCode = 2
         return
       }
@@ -67,7 +70,7 @@ export function registerConfigCommand(program: Command): void {
         parsedVal = keyDef.parse(value)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`[ant] error: ${msg}\n`)
+        notice.error(msg)
         process.exitCode = 2
         return
       }
@@ -83,7 +86,7 @@ export function registerConfigCommand(program: Command): void {
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`[ant] error: Failed to update settings: ${msg}\n`)
+        notice.error(`Failed to update settings: ${msg}`)
         process.exitCode = 2
       }
     })
@@ -94,7 +97,7 @@ export function registerConfigCommand(program: Command): void {
     .action(async (key: string) => {
       const keyDef = KEYS[key]
       if (!keyDef) {
-        process.stderr.write(`[ant] error: Unknown setting "${key}".\n`)
+        notice.error(`Unknown setting "${key}".`)
         process.exitCode = 2
         return
       }
@@ -110,7 +113,7 @@ export function registerConfigCommand(program: Command): void {
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`[ant] error: Failed to unset setting: ${msg}\n`)
+        notice.error(`Failed to unset setting: ${msg}`)
         process.exitCode = 2
       }
     })

@@ -2,6 +2,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
+import { decodeEntities as sharedDecodeEntities } from '../../utils/html.ts'
 
 // ─── Constants from example.ts ───────────────────────────────────────────────
 
@@ -52,19 +53,8 @@ export interface WebSearchData {
 // ─── Helper Functions from example.ts ────────────────────────────────────────
 
 export function decodeEntities(text: string): string {
-  return text
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&mdash;/g, '—')
-    .replace(/&ndash;/g, '–')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const stripped = text.replace(/<[^>]+>/g, '')
+  return sharedDecodeEntities(stripped).replace(/\s+/g, ' ').trim()
 }
 
 export function resolveRedirectUrl(rawUrl: string): string {

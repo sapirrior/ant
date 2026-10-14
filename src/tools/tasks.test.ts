@@ -5,14 +5,17 @@ import { TaskManagerRegistry } from './tasks.ts'
 describe('TaskManagerRegistry and background processes', () => {
   it('tracks spawned processes, captures output, and reads with cursor', async () => {
     const registry = new TaskManagerRegistry()
-    const child = spawn('/bin/sh', ['-c', 'echo "hello from task"; echo "second line"'])
+    const child = spawn('sh', ['-c', 'echo "hello from task"; echo "second line"'])
     const task = registry.createTask('echo test', child)
 
     expect(task.id).toBe('t1')
     expect(task.command).toBe('echo test')
 
-    // Wait briefly for execution
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    // Wait for execution
+    await new Promise((resolve) => {
+      child.on('exit', resolve)
+      setTimeout(resolve, 1000)
+    })
 
     const read1 = await registry.read('t1')
     expect(read1.output).toContain('hello from task')
@@ -25,10 +28,13 @@ describe('TaskManagerRegistry and background processes', () => {
 
   it('lists active and completed tasks with metadata', async () => {
     const registry = new TaskManagerRegistry()
-    const child = spawn('/bin/sh', ['-c', 'exit 0'])
+    const child = spawn('sh', ['-c', 'exit 0'])
     registry.createTask('exit 0', child)
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => {
+      child.on('exit', resolve)
+      setTimeout(resolve, 1000)
+    })
 
     const list = registry.list()
     expect(list.length).toBe(1)

@@ -1,10 +1,11 @@
 import { marked, type Token, type Tokens } from 'marked'
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight'
-import { createColorFormatter, type ColorLevel } from './color.ts'
+import { createColorFormatter, type ColorLevel, type ThemeMode } from './color.ts'
 
 export interface MarkdownOptions {
   columns?: number
   colorLevel?: ColorLevel
+  theme?: ThemeMode
 }
 
 const EOL = '\n'
@@ -498,7 +499,7 @@ export class StreamingMarkdownRenderer {
   private readonly columns: number
 
   constructor(options: MarkdownOptions = {}) {
-    this.fmt = createColorFormatter(options.colorLevel)
+    this.fmt = createColorFormatter(options.colorLevel, options.theme)
     this.highlightTheme = createHighlightTheme(this.fmt)
     this.columns = options.columns ?? getTerminalColumns()
   }

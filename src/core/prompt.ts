@@ -11,9 +11,10 @@ export function buildInstructions(
   config: Config,
   tools: readonly ToolDescriptionInfo[] = []
 ): string {
-  const isGit = existsSync(join(config.cwd, '.git'))
-  const today = new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const platform = process.platform
+  const isGit = existsSync(join(config.cwd, '.git'))
 
   const hasBash = tools.some((t) => t.name === 'Bash') || config.grants.has('shell.run')
   const hasTaskManager = tools.some((t) => t.name === 'TaskManager')

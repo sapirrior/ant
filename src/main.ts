@@ -8,6 +8,8 @@ import { registerCheckpointsCommand } from './cli/checkpoints.ts'
 import { registerUpdateCommand } from './cli/update.ts'
 import { registerMcpCommand } from './cli/mcp.ts'
 
+import { notice } from './output/notice.ts'
+
 export function createProgram(): Command {
   const program = new Command()
   program
@@ -15,19 +17,19 @@ export function createProgram(): Command {
     .description('A daily-use, streaming, model-agnostic AI agent CLI')
     .version(pkg.version, '-v, --version')
     .exitOverride((err) => {
-      // Keep help and version exit 0
-      if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
+      if (err.exitCode === 0) {
         process.exit(0)
       }
-      process.exitCode = 2
+      process.exitCode = err.exitCode ?? 2
       throw err
     })
     .configureOutput({
       writeErr: (str) => {
-        // Strip duplicate "error: " prefix if Commander added it
-        const clean = str.replace(/^error:\s*/i, '').trim()
-        if (clean) {
-          process.stderr.write(`[ant] error: ${clean}\n`)
+        if (/^error:\s*/i.test(str)) {
+          const clean = str.replace(/^error:\s*/i, '').trim()
+          if (clean) notice.error(clean)
+        } else {
+          process.stderr.write(str)
         }
       },
     })
@@ -50,9 +52,13 @@ export async function main(): Promise<void> {
 if (import.meta.main) {
   try {
     await main()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    process.stderr.write(`[ant] error: ${msg}\n`)
-    process.exitCode = process.exitCode || 2
+  } catch (err: any) {
+    if (err && typeof err.code === 'string' && err.code.startsWith('commander.')) {
+      // already reported by commander
+    } else {
+      const msg = err instanceof Error ? err.message : String(err)
+      notice.error(msg)
+      process.exitCode = process.exitCode || 2
+    }
   }
 }

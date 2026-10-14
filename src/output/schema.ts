@@ -7,6 +7,7 @@ export const UsageSchema = z.object({
   inputTokens: z.number().int().nonnegative().optional(),
   outputTokens: z.number().int().nonnegative().optional(),
   totalTokens: z.number().int().nonnegative().optional(),
+  cachedTokens: z.number().int().nonnegative().optional(),
 })
 
 export const ResultSchema = z.object({
@@ -76,6 +77,7 @@ export const StreamToolCallEventSchema = StreamBaseEventSchema.extend({
   name: z.string(),
   input: z.unknown(),
   truncated: z.boolean().optional(),
+  originalSize: z.number().int().optional(),
 })
 
 export const StreamToolResultEventSchema = StreamBaseEventSchema.extend({
@@ -87,6 +89,7 @@ export const StreamToolResultEventSchema = StreamBaseEventSchema.extend({
   durationMs: z.number().int().nonnegative(),
   output: z.unknown(),
   truncated: z.boolean().optional(),
+  originalSize: z.number().int().optional(),
 })
 
 export const StreamStepEventSchema = StreamBaseEventSchema.extend({

@@ -8,7 +8,7 @@ export interface RepairHistoryResult {
 /**
  * Repairs conversation message history when resuming an interrupted or crashed session.
  *
- * Rules per Plan §2.6:
+ * Rules:
  * 1. Assistant message with tool-call parts and no following matching tool-result:
  *    append a tool message with error results for each orphan call.
  * 2. History ending in a user message: append a synthetic assistant marker

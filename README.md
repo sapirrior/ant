@@ -157,11 +157,14 @@ ant mcp disable git
 ant mcp enable git
 
 # Pre-authorize MCP tools during run (or use interactive confirmation)
+# Pre-authorize MCP tools during run (or use interactive confirmation)
 ant "Analyze git log" --allow-mcp "git/*"
 
-# Explicitly deny specific MCP tools during run
-ant "Analyze repo" --deny-mcp "git/delete_repo"
+# Explicitly deny specific MCP tools during run (supports glob patterns)
+ant "Analyze repo" --deny-mcp "git/delete_*"
 ```
+
+> **Security Note on MCP Scoping:** Project-scoped MCP servers (`.ant/mcp.json`) are isolated from ambient environment variables for repository security. For servers requiring sensitive system tokens (e.g. personal access tokens), configure them in global configuration (`~/.ant/mcp.json` or `ant mcp add ... --global`).
 
 ---
 
@@ -175,10 +178,11 @@ ant config get model                 # Get specific configuration value
 ant config set model <provider/id>   # Set default model
 ant config set allow.read true       # Enable read permission by default
 ant config set allow.bash true       # Enable bash permission by default
+ant config set allow.sensitive true  # Enable reading sensitive files by default
 ant config set allow.mcp "git/*"     # Pre-authorize MCP tools by default
 ant config set deny.mcp "git/delete" # Deny specific MCP tools by default
 ant config set effort medium         # Set reasoning effort (low, medium, high)
-ant config set timeout 10m           # Set default task timeout
+ant config set timeout 10m           # Set default task timeout (e.g. 10m, 30s)
 ```
 
 **Precedence:** CLI flags > Environment variables > Saved settings.
@@ -190,7 +194,10 @@ ant config set timeout 10m           # Set default task timeout
 Integrate `ant` into your shell scripts, editors, or CI pipelines:
 
 ```bash
-# Single JSON result to stdout
+# Pipe diffs or logs directly through stdin
+git diff | ant "Review these changes for bugs"
+
+# Single JSON result to stdout (clean stdout for piping)
 ant -p "Summarize git diff" --allow-read -o json | jq -r '.text'
 
 # Real-time event stream (NDJSON)
@@ -212,20 +219,22 @@ Every release note you see on the [Releases page](https://github.com/sapirrior/a
 
 | Flag | Description |
 |---|---|
-| `-p, --prompt <text>` | Instruction prompt (or pass as argument / pipe via stdin) |
+| `-p, --prompt <text>` | Instruction prompt (or pass as positional argument / pipe via stdin) |
 | `-m, --model <id>` | Target model (`google/...`, `anthropic/...`, `openrouter/...`) |
 | `-e, --effort <level>` | Reasoning effort (`none`, `low`, `medium`, `high`, `max`) |
-| `--allow-read` | Allow reading files and directories |
+| `--allow-read` | Allow reading files and listing directories |
 | `--allow-edit` | Allow editing and writing files |
 | `--allow-bash` | Allow running safe shell commands |
-| `--allow-destructive-bash` | Allow destructive shell commands |
-| `--allow-mcp <patterns...>` | Pre-authorize MCP tools (e.g. `github/*`, `db/query`, or `*`) |
-| `--deny-mcp <patterns...>` | Explicitly deny MCP tools during execution |
+| `--allow-destructive-bash` | Allow destructive shell commands without prompt |
+| `--allow-sensitive` | Allow reading sensitive/secret files (`.env`, `credentials`, etc.) |
+| `--allow-mcp <pattern>` | Pre-authorize MCP tools (repeatable, e.g. `github/*`, `db/*`, or `*`) |
+| `--deny-mcp <pattern>` | Explicitly deny MCP tools during execution (overrides allow) |
 | `-c, --continue` | Continue the latest session in the current directory |
 | `-r, --resume <id>` | Resume a specific session by thread ID |
 | `-o, --output <format>` | Output format: `text`, `md`, `json`, `stream-json` |
-| `-t, --timeout <dur>` | Execution timeout (e.g. `30s`, `10m`) |
+| `-t, --timeout <dur>` | Execution timeout (`30s`, `10m`, `1h`, or ms >= 1000; `0` = disabled) |
 | `-s, --max-steps <num>` | Maximum tool execution steps (default: 30) |
+| `--theme <theme>` | Terminal theme mode: `auto`, `dark`, `light`, `ansi` |
 
 ---
 

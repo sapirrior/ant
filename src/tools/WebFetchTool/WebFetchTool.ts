@@ -3,6 +3,8 @@ import { z } from 'zod'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { WEB_FETCH_DESCRIPTION } from './prompt.ts'
+import { validatePublicHost } from '../../policy/net.ts'
+import { decodeEntities } from '../../utils/html.ts'
 
 export const webFetchInputSchema = z.object({
   url: z.string().url().describe('The web page URL to fetch.'),
@@ -92,14 +94,7 @@ export function transformHtmlToReadableMarkdown(html: string): { title: string; 
   clean = clean.replace(/<[^>]+>/g, ' ')
 
   // 7. Unescape entities
-  clean = clean
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, ' ')
+  clean = decodeEntities(clean)
 
   // 8. Collapse whitespace and repeated empty lines
   const lines = clean
@@ -164,53 +159,92 @@ export function createWebFetchTool(context: ToolExecutionContext) {
     inputSchema: webFetchInputSchema,
     execute: async (input) => {
       return executeWithPolicy('WebFetch', input, context, async (args) => {
-        let parsedUrl: URL
-        try {
-          parsedUrl = new URL(args.url)
-        } catch {
-          throw new Error(`Invalid URL: "${args.url}"`)
-        }
-
-        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-          throw new Error(`Invalid protocol "${parsedUrl.protocol}". Only http: and https: are allowed.`)
-        }
-
-        const hostname = parsedUrl.hostname.toLowerCase()
-        if (
-          hostname === 'localhost' ||
-          hostname === '127.0.0.1' ||
-          hostname === '::1' ||
-          hostname === '169.254.169.254' ||
-          hostname.startsWith('10.') ||
-          hostname.startsWith('192.168.') ||
-          /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
-        ) {
-          throw new Error(`Access to local or private network address "${hostname}" is prohibited.`)
-        }
-
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 20000)
-
         const onAbort = () => controller.abort()
-        context.abortSignal?.addEventListener('abort', onAbort, { once: true })
+        if (context.abortSignal) {
+          context.abortSignal.addEventListener('abort', onAbort, { once: true })
+        }
 
         try {
-          const res = await fetch(args.url, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
-            },
-            signal: controller.signal,
-          })
+          let currentUrl = args.url
+          let res: Response | null = null
+
+          for (let hop = 0; hop < 5; hop++) {
+            let parsedUrl: URL
+            try {
+              parsedUrl = new URL(currentUrl)
+            } catch {
+              throw new Error(`Invalid URL: "${currentUrl}"`)
+            }
+
+            if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+              throw new Error(`Invalid protocol "${parsedUrl.protocol}". Only http: and https: are allowed.`)
+            }
+
+            await validatePublicHost(parsedUrl.hostname)
+
+            const resp = await fetch(currentUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+              },
+              redirect: 'manual',
+              signal: controller.signal,
+            })
+
+            if (resp.status >= 300 && resp.status < 400 && resp.headers.get('location')) {
+              currentUrl = new URL(resp.headers.get('location')!, currentUrl).toString()
+              continue
+            }
+
+            res = resp
+            break
+          }
+
+          if (!res) {
+            throw new Error(`Failed to fetch ${args.url}: too many redirects`)
+          }
 
           if (!res.ok) {
             throw new Error(`Failed to fetch ${args.url}: HTTP ${res.status} ${res.statusText}`)
           }
 
           const contentType = res.headers.get('content-type') || ''
+          const isAllowedType =
+            contentType.includes('text/') ||
+            contentType.includes('application/json') ||
+            contentType.includes('application/xml') ||
+            contentType.includes('application/xhtml+xml')
+
+          if (!isAllowedType) {
+            throw new Error(`Unsupported content type "${contentType}". Only text and HTML/XML/JSON content are supported.`)
+          }
+
           const isHtml = contentType.includes('html')
 
-          const rawBody = await res.text()
+          // Read body with 5 MiB cap
+          const reader = res.body?.getReader()
+          let rawBody = ''
+          if (reader) {
+            const decoder = new TextDecoder()
+            let bytesRead = 0
+            const MAX_BYTES = 5 * 1024 * 1024
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              bytesRead += value.byteLength
+              if (bytesRead > MAX_BYTES) {
+                reader.cancel()
+                throw new Error('Response body exceeded maximum limit of 5 MiB')
+              }
+              rawBody += decoder.decode(value, { stream: true })
+            }
+            rawBody += decoder.decode()
+          } else {
+            rawBody = await res.text()
+          }
+
           let title = ''
           let formattedContent = ''
 
@@ -235,11 +269,13 @@ export function createWebFetchTool(context: ToolExecutionContext) {
             returnedChars: contentSlice.length,
             truncated,
             totalChunks: chunks.length,
-            chunks,
             content: contentSlice,
           }
         } finally {
           clearTimeout(timer)
+          if (context.abortSignal) {
+            context.abortSignal.removeEventListener('abort', onAbort)
+          }
         }
       })
     },

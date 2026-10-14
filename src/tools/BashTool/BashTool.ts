@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { classifyBashCommand } from '../../policy/bash.ts'
-import { promptConfirmTTY } from '../../output/tty.ts'
+import { promptConfirmTTY, hasControllingTTY } from '../../output/tty.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { BASH_DESCRIPTION } from './prompt.ts'
 
@@ -79,18 +80,30 @@ export function createBashTool(context: ToolExecutionContext) {
       }
 
       if (verdict.status === 'ask' && !hasDestructiveGrant) {
-        // Must confirm interactively via /dev/tty
-        const confirmed = context.ui?.confirm
-          ? context.ui.confirm({
-              message: 'Bash wants to run',
-              command: input.command,
-              reason: verdict.reason,
-            })
+        const hasTTY = hasControllingTTY()
+        if (!context.ui?.confirm && !hasTTY) {
+          return {
+            ok: false,
+            output: null,
+            error:
+              'No terminal available for interactive confirmation. Re-run with --allow-bash or --allow-destructive-bash.',
+          }
+        }
+
+        const confirmed = await (context.ui?.confirm
+          ? Promise.resolve(
+              context.ui.confirm({
+                message: 'Bash wants to run',
+                command: input.command,
+                reason: verdict.reason,
+              })
+            )
           : promptConfirmTTY({
               message: 'Bash wants to run',
               command: input.command,
               reason: verdict.reason,
-            })
+              signal: context.abortSignal,
+            }))
 
         if (!confirmed) {
           return {
@@ -124,37 +137,52 @@ export function createBashTool(context: ToolExecutionContext) {
         const child = spawn(shellBin, ['-c', args.command], {
           cwd: context.cwd,
           detached: true,
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: [args.background ? 'pipe' : 'ignore', 'pipe', 'pipe'],
           env,
         })
 
-        // Attach error handler immediately to avoid unhandled exception crash (B-007)
-        let spawnErrorMessage: string | null = null
-        child.on('error', (err) => {
-          spawnErrorMessage = err.message
+        const spawnPromise = new Promise<void>((resolve, reject) => {
+          child.once('spawn', () => resolve())
+          child.once('error', (err) => reject(err))
         })
 
-        if (!child.pid) {
-          throw new Error(`Failed to spawn bash process: ${spawnErrorMessage ?? 'unknown spawn error'}`)
+        try {
+          await spawnPromise
+        } catch (err) {
+          throw new Error(`Failed to spawn bash process: ${err instanceof Error ? err.message : String(err)}`)
         }
 
-        const pid = child.pid
+        const pid = child.pid!
         let combinedOutput = ''
+        let totalChars = 0
         let exitCode: number | null = null
         let exitSignal: string | null = null
 
+        const stdoutDecoder = new StringDecoder('utf-8')
+        const stderrDecoder = new StringDecoder('utf-8')
+
         // Cap buffer during collection to prevent unbounded memory growth (B-004)
         const MAX_BUFFER = 100000
-        const appendChunk = (chunk: Buffer | string) => {
-          const str = typeof chunk === 'string' ? chunk : chunk.toString('utf-8')
+        const appendStdout = (chunk: Buffer | string) => {
+          const str = typeof chunk === 'string' ? chunk : stdoutDecoder.write(chunk)
+          totalChars += str.length
           combinedOutput += str
           if (combinedOutput.length > MAX_BUFFER) {
             combinedOutput = combinedOutput.slice(-MAX_BUFFER)
           }
         }
 
-        child.stdout?.on('data', appendChunk)
-        child.stderr?.on('data', appendChunk)
+        const appendStderr = (chunk: Buffer | string) => {
+          const str = typeof chunk === 'string' ? chunk : stderrDecoder.write(chunk)
+          totalChars += str.length
+          combinedOutput += str
+          if (combinedOutput.length > MAX_BUFFER) {
+            combinedOutput = combinedOutput.slice(-MAX_BUFFER)
+          }
+        }
+
+        child.stdout?.on('data', appendStdout)
+        child.stderr?.on('data', appendStderr)
 
         const closePromise = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
           child.on('close', (code, sig) => {
@@ -203,9 +231,13 @@ export function createBashTool(context: ToolExecutionContext) {
         try {
           // If immediate background requested and enabled:
           if (args.background && backgroundEnabled && context.tasks) {
-            child.stdout?.removeListener('data', appendChunk)
-            child.stderr?.removeListener('data', appendChunk)
+            child.stdout?.removeListener('data', appendStdout)
+            child.stderr?.removeListener('data', appendStderr)
             const task = context.tasks.createTask(args.command, child, combinedOutput)
+            if (hardTimer) {
+              task.hardTimer = hardTimer
+              hardTimer = null
+            }
             return {
               status: 'running',
               taskId: task.id,
@@ -223,7 +255,7 @@ export function createBashTool(context: ToolExecutionContext) {
           ])
 
           if (waitResult.type === 'exit') {
-            const finalOutput = formatOutputChars(combinedOutput)
+            const finalOutput = formatOutputChars(combinedOutput, totalChars)
             return {
               status: 'exited',
               exitCode: waitResult.res.code ?? 0,
@@ -235,9 +267,13 @@ export function createBashTool(context: ToolExecutionContext) {
 
           // Still running after foregroundMs
           if (backgroundEnabled && context.tasks) {
-            child.stdout?.removeListener('data', appendChunk)
-            child.stderr?.removeListener('data', appendChunk)
+            child.stdout?.removeListener('data', appendStdout)
+            child.stderr?.removeListener('data', appendStderr)
             const task = context.tasks.createTask(args.command, child, combinedOutput)
+            if (hardTimer) {
+              task.hardTimer = hardTimer
+              hardTimer = null
+            }
             return {
               status: 'running',
               taskId: task.id,
@@ -248,9 +284,15 @@ export function createBashTool(context: ToolExecutionContext) {
 
           // Not background-enabled: kill and report timed_out
           killGroup('SIGTERM')
-          setTimeout(() => killGroup('SIGKILL'), 3000).unref()
+          const killTimer = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) {
+              killGroup('SIGKILL')
+            }
+          }, 3000)
+          killTimer.unref()
           await closePromise
-          const finalOutput = formatOutputChars(combinedOutput)
+          clearTimeout(killTimer)
+          const finalOutput = formatOutputChars(combinedOutput, totalChars)
           return {
             status: 'timed_out',
             exitCode: exitCode ?? 1,
@@ -269,14 +311,14 @@ export function createBashTool(context: ToolExecutionContext) {
   })
 }
 
-function formatOutputChars(raw: string): { text: string; truncated: boolean } {
+function formatOutputChars(raw: string, totalChars: number): { text: string; truncated: boolean } {
   const MAX_CHARS = 30000
-  if (raw.length <= MAX_CHARS) {
+  if (totalChars <= MAX_CHARS) {
     return { text: raw, truncated: false }
   }
   const head = raw.slice(0, 10000)
   const tail = raw.slice(-20000)
-  const omitted = raw.length - 30000
+  const omitted = totalChars - 30000
   return {
     text: `${head}\n[... ${omitted} chars omitted ...]\n${tail}`,
     truncated: true,

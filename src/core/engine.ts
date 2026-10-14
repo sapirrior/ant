@@ -3,6 +3,8 @@ import type { Database } from 'bun:sqlite'
 import { realpathSync } from 'node:fs'
 import { runAgent } from './agent.ts'
 import { StderrLogger } from '../output/log.ts'
+import { detectColorLevel } from '../output/color.ts'
+import { setNoticeTheme } from '../output/notice.ts'
 import type { Config, ExitCode, RunEvent, UsageSummary } from './types.ts'
 import { openDb, acquireLease, releaseLease } from '../store/db.ts'
 import {
@@ -10,6 +12,7 @@ import {
   getThread,
   getMessages,
   appendMessage,
+  appendMessages,
   recordStepMessages,
   type ThreadRecord,
 } from '../store/threads.ts'
@@ -19,39 +22,43 @@ import { createOutputSink, StreamJsonSink } from '../output/sink.ts'
 import { createLifecycle } from './lifecycle.ts'
 import { repairHistory } from '../store/repair.ts'
 
-export function setupSignalHandler(): {
-  readonly controller: AbortController
-  readonly cleanup: () => void
-} {
-  const lifecycle = createLifecycle()
-  return {
-    controller: lifecycle.controller,
-    cleanup: () => lifecycle.dispose(),
-  }
-}
-
 export class Engine {
   async run(config: Config): Promise<ExitCode> {
-    const logger = new StderrLogger(config.logLevel)
+    const isStderrTTY = Boolean(process.stderr.isTTY)
+    const stderrColorLevel = detectColorLevel(process.env, isStderrTTY)
+    const logger = new StderrLogger(config.logLevel, stderrColorLevel, config.theme)
+    if (config.theme) setNoticeTheme(config.theme)
     const lifecycle = createLifecycle()
     const startTime = Date.now()
     const tasks = new TaskManagerRegistry()
     const mcpManager = new (await import('../mcp/manager.ts')).McpClientManager({ cwd: config.cwd })
     const createdCheckpoints: number[] = []
 
-    // Clamp timeout to 32-bit positive integer (Plan §2.2 / I9)
+    // Clamp timeout to 32-bit positive integer
     const clampedTimeoutMs = config.timeoutMs > 0 ? Math.min(config.timeoutMs, 2_147_483_647) : 0
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined
     if (clampedTimeoutMs > 0) {
       timeoutTimer = setTimeout(() => {
         logger.error(`Execution timed out after ${clampedTimeoutMs}ms`)
-        lifecycle.controller.abort('timeout')
+        lifecycle.requestAbort('timeout', 4)
       }, clampedTimeoutMs)
       timeoutTimer.unref()
     }
 
     let db: Database | undefined
     let activeThreadId: string | undefined
+    const heartbeatTimer = setInterval(() => {
+      if (db && activeThreadId) {
+        try {
+          db.run('UPDATE threads SET lock_at = ? WHERE id = ? AND lock_pid = ?', [
+            Date.now(),
+            activeThreadId,
+            process.pid,
+          ])
+        } catch {}
+      }
+    }, 10_000)
+    heartbeatTimer.unref()
 
     // Register emergency cleanups for immediate termination signals
     lifecycle.onEmergencyCleanup(() => {
@@ -83,83 +90,71 @@ export class Engine {
         // fallback
       }
 
-      if (config.resumeThreadId) {
-        thread = getThread(db, config.resumeThreadId, realCwd)
-        if (thread.cwd !== realCwd) {
-          throw new Error(`thread belongs to ${thread.cwd}; cd there first`)
+      const loadExisting = (threadIdOrLatest: string) => {
+        const t = getThread(db!, threadIdOrLatest, realCwd)
+        if (t.cwd !== realCwd) {
+          throw new Error(`thread belongs to ${t.cwd}; cd there first`)
         }
-        if (thread.model !== config.model) {
-          modelMismatchOld = thread.model
-          db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
+        activeThreadId = t.id
+        acquireLease(db!, t.id)
+        if (t.model !== config.model) {
+          modelMismatchOld = t.model
+          db!.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
             config.model,
             Date.now(),
-            thread.id,
+            t.id,
           ])
-          thread.model = config.model
+          t.model = config.model
         }
-        activeThreadId = thread.id
-        acquireLease(db, thread.id)
-        const storedMessages = getMessages(db, thread.id)
+        const storedMessages = getMessages(db!, t.id)
         const repaired = repairHistory(storedMessages)
         if (repaired.repaired.length > 0) {
-          logger.info(`Session history repaired on resume: ${repaired.repaired.join(', ')}`)
-          // Persist repaired messages
-          db.run('DELETE FROM messages WHERE thread_id = ?', [thread.id])
-          let seq = 0
-          for (const msg of repaired.messages) {
-            seq++
-            db.run('INSERT INTO messages (thread_id, seq, json) VALUES (?, ?, ?)', [
-              thread.id,
-              seq,
-              JSON.stringify(msg),
-            ])
+          logger.info(`Session history repaired: ${repaired.repaired.join(', ')}`)
+          const tail = repaired.messages.slice(storedMessages.length)
+          if (tail.length > 0) {
+            appendMessages(db!, t.id, tail)
           }
         }
-        messages = repaired.messages
-        isNewThread = false
-      } else if (config.continueLatest) {
-        thread = getThread(db, 'latest', realCwd)
-        if (thread.cwd !== realCwd) {
-          throw new Error(`thread belongs to ${thread.cwd}; cd there first`)
-        }
-        if (thread.model !== config.model) {
-          modelMismatchOld = thread.model
-          db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
-            config.model,
-            Date.now(),
-            thread.id,
-          ])
-          thread.model = config.model
-        }
-        activeThreadId = thread.id
-        acquireLease(db, thread.id)
-        const storedMessages = getMessages(db, thread.id)
-        const repaired = repairHistory(storedMessages)
-        if (repaired.repaired.length > 0) {
-          logger.info(`Session history repaired on continue: ${repaired.repaired.join(', ')}`)
-          db.run('DELETE FROM messages WHERE thread_id = ?', [thread.id])
-          let seq = 0
-          for (const msg of repaired.messages) {
-            seq++
-            db.run('INSERT INTO messages (thread_id, seq, json) VALUES (?, ?, ?)', [
-              thread.id,
-              seq,
-              JSON.stringify(msg),
-            ])
-          }
-        }
-        messages = repaired.messages
-        isNewThread = false
-      } else {
-        // Validate user instruction before creating a thread row
-        let userContent = ''
+        return { t, msgs: repaired.messages }
+      }
+
+      const buildUserContent = () => {
         if (config.prompt && config.stdinInput) {
-          userContent = `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
-        } else if (config.prompt) {
-          userContent = config.prompt
-        } else if (config.stdinInput) {
-          userContent = config.stdinInput
+          return `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
+        }
+        return config.prompt || config.stdinInput || undefined
+      }
+
+      const existingThreadId = config.resumeThreadId ?? (config.continueLatest ? 'latest' : undefined)
+      if (existingThreadId) {
+        const loaded = loadExisting(existingThreadId)
+        thread = loaded.t
+        messages = loaded.msgs
+        isNewThread = false
+
+        const userContent = buildUserContent()
+        if (userContent) {
+          const userMessage: ModelMessage = {
+            role: 'user',
+            content: userContent,
+          }
+          appendMessage(db, thread.id, userMessage)
+          messages.push(userMessage)
         } else {
+          // If continuing/resuming without an additional prompt, ensure conversation ends in a user turn
+          const lastMsg = messages[messages.length - 1]
+          if (!lastMsg || lastMsg.role !== 'user') {
+            const continueMessage: ModelMessage = {
+              role: 'user',
+              content: 'Continue where you left off.',
+            }
+            appendMessage(db, thread.id, continueMessage)
+            messages.push(continueMessage)
+          }
+        }
+      } else {
+        const userContent = buildUserContent()
+        if (!userContent) {
           throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
         }
 
@@ -180,64 +175,11 @@ export class Engine {
         messages.push(userMessage)
       }
 
-      if (!isNewThread) {
-        let userContent = ''
-        if (config.prompt && config.stdinInput) {
-          userContent = `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
-        } else if (config.prompt) {
-          userContent = config.prompt
-        } else if (config.stdinInput) {
-          userContent = config.stdinInput
-        }
-
-        if (userContent) {
-          const userMessage: ModelMessage = {
-            role: 'user',
-            content: userContent,
-          }
-          appendMessage(db, thread.id, userMessage)
-          messages.push(userMessage)
-        } else {
-          // If continuing/resuming without an additional prompt, ensure conversation ends in a user turn
-          const lastMsg = messages[messages.length - 1]
-          if (!lastMsg || lastMsg.role !== 'user') {
-            const continueMessage: ModelMessage = {
-              role: 'user',
-              content: 'Continue where you left off.',
-            }
-            appendMessage(db, thread.id, continueMessage)
-            messages.push(continueMessage)
-          }
-        }
-      }
-
       const allowedCaps: string[] = []
       if (config.grants.has('fs.read')) allowedCaps.push('read')
       if (config.grants.has('fs.write')) allowedCaps.push('edit')
       if (config.grants.has('shell.run')) allowedCaps.push('bash')
       if (config.grants.has('shell.destructive')) allowedCaps.push('destructiveBash')
-
-      logger.header({
-        model: config.model,
-        threadId: thread.id,
-        title: thread.title,
-        isNew: isNewThread,
-        messageCount: messages.length,
-        allowedCaps,
-        modelMismatchOld,
-      })
-
-      // Create OutputSink according to outputFormat
-      const isStdoutTTY = Boolean(process.stdout.isTTY)
-      const sink = createOutputSink({
-        format: config.outputFormat,
-        isStdoutTTY,
-        threadId: thread.id,
-        checkpoints: createdCheckpoints,
-        model: config.model,
-        effort: config.effort,
-        startTime,
-      })
 
       const activeToolsList: string[] = []
       if (config.grants.has('fs.read')) {
@@ -251,15 +193,44 @@ export class Engine {
       }
       activeToolsList.push('WebSearch', 'WebFetch')
 
+      logger.header({
+        model: config.model,
+        provider: config.model.split('/')[0],
+        threadId: thread.id,
+        title: thread.title,
+        isNew: isNewThread,
+        messageCount: messages.length,
+        allowedCaps,
+        modelMismatchOld,
+        toolsList: activeToolsList,
+      })
+
+      // Create OutputSink according to outputFormat
+      const isStdoutTTY = Boolean(process.stdout.isTTY)
+      const stdoutColorLevel = detectColorLevel(process.env, isStdoutTTY)
+      const sink = createOutputSink({
+        format: config.outputFormat,
+        isStdoutTTY,
+        threadId: thread.id,
+        checkpoints: createdCheckpoints,
+        model: config.model,
+        effort: config.effort,
+        startTime,
+        colorLevel: stdoutColorLevel,
+        theme: config.theme,
+      })
+
       if (sink instanceof StreamJsonSink) {
         sink.emitInit({
           threadId: thread.id,
           model: config.model,
+          provider: config.model.split('/')[0],
           cwd: config.cwd,
           effort: config.effort ?? null,
           grants: allowedCaps,
           tools: activeToolsList,
           resumed: !isNewThread,
+          modelChangedFrom: modelMismatchOld ?? null,
         })
       }
 
@@ -271,9 +242,9 @@ export class Engine {
         agentContext: {
           tasks,
           mcpManager,
-          onStepPersist: (stepMessages: ModelMessage[], usage?: UsageSummary) => {
-            // Atomic step message and usage persistence (Plan §2.5 / I1)
-            recordStepMessages(db!, thread.id, stepMessages, 1, usage)
+          onStepPersist: (stepMessages: ModelMessage[], usage?: UsageSummary, stepsIncrement = 1) => {
+            // Atomic step message and usage persistence
+            recordStepMessages(db!, thread.id, stepMessages, stepsIncrement, usage)
           },
         },
         onCheckpoint: (tool, toolCallId, files) => {
@@ -286,6 +257,7 @@ export class Engine {
 
           switch (event.type) {
             case 'tool-call': {
+              sink.ensureLineStart?.()
               let summary: string | undefined
               if (typeof event.input === 'object' && event.input !== null) {
                 const obj = event.input as Record<string, unknown>
@@ -305,10 +277,15 @@ export class Engine {
               break
             }
             case 'tool-result': {
-              logger.toolEnd('done', event.durationMs, Boolean(event.isError))
+              sink.ensureLineStart?.()
+              const summary = event.isError
+                ? (typeof event.output === 'string' ? event.output.split('\n')[0]?.slice(0, 120) : 'failed')
+                : 'done'
+              logger.toolEnd(summary || 'done', event.durationMs, Boolean(event.isError))
               break
             }
             case 'step-finish': {
+              sink.ensureLineStart?.()
               logger.debug(`step ${event.stepNumber} finished (${event.finishReason})`)
               break
             }
@@ -328,7 +305,7 @@ export class Engine {
         }
       }
 
-      // Record last_status and last_exit_code in threads table (Migration 2 / Plan §2.5)
+      // Record last_status and last_exit_code in threads table
       try {
         db.run('UPDATE threads SET last_status = ?, last_exit_code = ?, updated_at = ? WHERE id = ?', [
           outcome.status,
@@ -349,6 +326,7 @@ export class Engine {
         startTime,
       })
 
+      sink.ensureLineStart?.()
       logger.footer({
         status: outcome.status,
         steps: outcome.stepsExecuted,
@@ -365,6 +343,7 @@ export class Engine {
       logger.error(message)
       return 2
     } finally {
+      clearInterval(heartbeatTimer)
       if (timeoutTimer) {
         clearTimeout(timeoutTimer)
       }

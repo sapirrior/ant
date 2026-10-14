@@ -40,7 +40,7 @@ export const LIGHT_THEME: ThemeColors = {
   text: [0, 0, 0],
 }
 
-// 16-color table explicitly specified in Plan §10.2
+// Standard 16-color ANSI mapping
 export const ANSI_16_MAP: Record<keyof ThemeColors, number> = {
   primary: 33,   // yellow
   secondary: 94, // bright blue
@@ -92,7 +92,7 @@ export function resolveTheme(
     if (fgbg) {
       const parts = fgbg.split(';')
       const bg = parts[parts.length - 1] ? Number.parseInt(parts[parts.length - 1]!, 10) : 0
-      if (bg >= 7) return LIGHT_THEME
+      if (bg === 7 || bg === 15) return LIGHT_THEME
     }
   }
 
@@ -199,16 +199,5 @@ export function getSymbols(unicode: boolean = detectUnicodeSupported()): Termina
   }
 }
 
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const s = ms / 1000
-  if (s < 60) return `${s.toFixed(1)}s`
-  const m = Math.floor(s / 60)
-  const remSec = (s % 60).toFixed(0)
-  return `${m}m ${remSec}s`
-}
+export { formatDuration, formatTokens } from '../utils/format.ts'
 
-export function formatTokens(n: number): string {
-  if (n < 1000) return `${n}`
-  return `${(n / 1000).toFixed(1)}k`
-}

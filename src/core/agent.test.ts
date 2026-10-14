@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { describeModelError, mapStatusToExitCode } from './agent.ts'
 import { APICallError, RetryError } from 'ai'
 
-describe('core/agent error description and status mapping (Phase 7)', () => {
+describe('core/agent error description and status mapping', () => {
   it('maps execution statuses to standard CLI exit codes accurately', () => {
     expect(mapStatusToExitCode('completed')).toBe(0)
     expect(mapStatusToExitCode('max_steps')).toBe(1)

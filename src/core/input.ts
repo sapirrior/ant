@@ -4,12 +4,19 @@ export const MAX_STDIN_BYTES = 10 * 1024 * 1024 // 10 MiB limit
 
 export async function readPipedStdin(
   maxBytes: number = MAX_STDIN_BYTES,
-  timeoutMs = Number.parseInt(process.env.ANT_STDIN_TIMEOUT ?? '5000', 10),
+  timeoutMs = process.env.ANT_STDIN_TIMEOUT ? Number.parseInt(process.env.ANT_STDIN_TIMEOUT, 10) : 0,
   signal?: AbortSignal
 ): Promise<string | undefined> {
+  if (process.stdin.isTTY) {
+    return undefined
+  }
+
   try {
     const stat = fstatSync(0)
-    if (!stat.isFIFO() && !stat.isFile()) {
+    if (stat.isCharacterDevice()) {
+      return undefined // e.g. /dev/null or terminal character device
+    }
+    if (!stat.isFIFO() && !stat.isFile() && !stat.isSocket()) {
       return undefined
     }
   } catch {
@@ -19,40 +26,78 @@ export async function readPipedStdin(
   const chunks: Buffer[] = []
   let totalBytes = 0
 
-  const readPromise = (async () => {
-    for await (const chunk of process.stdin) {
-      if (signal?.aborted) break
-      const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-      totalBytes += bufferChunk.length
-      if (totalBytes > maxBytes) {
-        throw new Error(`Piped stdin exceeds the maximum allowed size of ${maxBytes} bytes (10 MiB).`)
+  return new Promise<string | undefined>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer)
+      process.stdin.pause()
+      process.stdin.removeListener('data', onData)
+      process.stdin.removeListener('end', onEnd)
+      process.stdin.removeListener('error', onError)
+    }
+
+    const resetIdleTimer = () => {
+      if (timer) clearTimeout(timer)
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          cleanup()
+          process.stdin.destroy()
+          if (chunks.length > 0) {
+            process.stderr.write('warning: stdin truncated due to idle timeout\n')
+            const content = Buffer.concat(chunks).toString('utf-8')
+            resolve(content.trim().length === 0 ? undefined : content)
+          } else {
+            resolve(undefined)
+          }
+        }, timeoutMs)
+        timer.unref()
       }
-      chunks.push(bufferChunk)
     }
-  })()
 
-  // Guard against parent processes leaving stdin pipes open without sending EOF
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeoutPromise = new Promise<'timeout'>((resolve) => {
-    if (timeoutMs > 0) {
-      timer = setTimeout(() => resolve('timeout'), timeoutMs)
-      timer.unref()
+    const onData = (chunk: Buffer | string) => {
+      resetIdleTimer()
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      totalBytes += buf.length
+      if (totalBytes > maxBytes) {
+        cleanup()
+        process.stdin.destroy()
+        reject(new Error(`Piped stdin exceeds the maximum allowed size of ${maxBytes} bytes (10 MiB).`))
+        return
+      }
+      chunks.push(buf)
     }
+
+    const onEnd = () => {
+      cleanup()
+      if (chunks.length === 0 || totalBytes === 0) {
+        resolve(undefined)
+        return
+      }
+      const content = Buffer.concat(chunks).toString('utf-8')
+      resolve(content.trim().length === 0 ? undefined : content)
+    }
+
+    const onError = (err: Error) => {
+      cleanup()
+      reject(err)
+    }
+
+    if (signal) {
+      if (signal.aborted) {
+        resolve(undefined)
+        return
+      }
+      signal.addEventListener('abort', () => {
+        cleanup()
+        resolve(undefined)
+      }, { once: true })
+    }
+
+    resetIdleTimer()
+    process.stdin.on('data', onData)
+    process.stdin.on('end', onEnd)
+    process.stdin.on('error', onError)
+    process.stdin.resume()
   })
-
-  try {
-    const res = await Promise.race([readPromise.then(() => 'done' as const), timeoutPromise])
-    if (res === 'timeout' && chunks.length === 0) {
-      return undefined
-    }
-  } finally {
-    if (timer) clearTimeout(timer)
-  }
-
-  if (chunks.length === 0 || totalBytes === 0) {
-    return undefined
-  }
-
-  const content = Buffer.concat(chunks).toString('utf-8')
-  return content.trim().length === 0 ? undefined : content
 }

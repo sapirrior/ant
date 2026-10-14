@@ -3,18 +3,14 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
-  unlinkSync,
   writeFileSync,
-  openSync,
-  closeSync,
 } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { McpConfigFile, McpScope, McpServerConfig, ResolvedMcpServer } from './types.ts'
 
-export function getAntHome(): string {
-  return process.env.ANT_HOME ?? join(homedir(), '.ant')
-}
+import { getAntHome } from '../paths.ts'
+import { withFileLock } from '../utils/fileLock.ts'
+export { getAntHome } from '../paths.ts'
 
 export function getGlobalMcpConfigPath(): string {
   return join(getAntHome(), 'mcp.json')
@@ -32,93 +28,8 @@ export function getProjectMcpLockPath(cwd: string = process.cwd()): string {
   return join(cwd, '.ant', 'mcp.json.lock')
 }
 
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err: unknown) {
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code: string }).code === 'EPERM'
-    ) {
-      return true
-    }
-    return false
-  }
-}
-
 export async function withMcpFileLock<T>(lockPath: string, fn: () => T | Promise<T>): Promise<T> {
-  const maxWaitMs = 5000
-  const retryIntervalMs = 50
-  const staleAgeMs = 30000
-  const startTime = Date.now()
-  const dir = dirname(lockPath)
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-
-  const token = `${process.pid}_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  let acquired = false
-
-  while (true) {
-    try {
-      const fd = openSync(lockPath, 'wx')
-      writeFileSync(fd, `${token}\n${process.pid}\n${Date.now()}`, 'utf-8')
-      closeSync(fd)
-      acquired = true
-      break
-    } catch (err: unknown) {
-      if (
-        typeof err === 'object' &&
-        err !== null &&
-        'code' in err &&
-        (err as { code: string }).code === 'EEXIST'
-      ) {
-        try {
-          const content = readFileSync(lockPath, 'utf-8')
-          const lines = content.trim().split('\n')
-          if (lines.length >= 2) {
-            const pid = lines[1] ? Number.parseInt(lines[1], 10) : 0
-            const lockTime = lines[2] ? Number.parseInt(lines[2], 10) : 0
-            const age = Date.now() - lockTime
-
-            if (age > staleAgeMs || (pid > 0 && !pidAlive(pid))) {
-              try {
-                unlinkSync(lockPath)
-                continue
-              } catch {
-                // ignore
-              }
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        if (Date.now() - startTime > maxWaitMs) {
-          throw new Error(`Timeout waiting for MCP lock (${lockPath}) after ${maxWaitMs}ms`)
-        }
-        await new Promise((resolve) => setTimeout(resolve, retryIntervalMs))
-      } else {
-        throw err
-      }
-    }
-  }
-
-  try {
-    return await fn()
-  } finally {
-    if (acquired) {
-      try {
-        const content = readFileSync(lockPath, 'utf-8')
-        if (content.startsWith(token)) {
-          unlinkSync(lockPath)
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
+  return withFileLock(lockPath, fn, { name: 'MCP' })
 }
 
 export function loadMcpConfigFile(filePath: string): McpConfigFile {

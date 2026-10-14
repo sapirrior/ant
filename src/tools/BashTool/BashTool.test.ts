@@ -3,7 +3,7 @@ import { createBashTool } from './BashTool.ts'
 import { TaskManagerRegistry } from '../tasks.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
 
-describe('BashTool Phase 6 integration and execution', () => {
+describe('BashTool integration and execution', () => {
   const cwd = process.cwd()
 
   const mockOptions = { toolCallId: 'call_1', messages: [] as any, context: {} as any }

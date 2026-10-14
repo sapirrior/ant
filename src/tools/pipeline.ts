@@ -1,10 +1,27 @@
 import type { ToolExecutionContext, ToolExecutionResult, ToolName } from '../core/types.ts'
 
+function abortRejection(signal?: AbortSignal): Promise<never> {
+  if (!signal) return new Promise(() => {})
+  if (signal.aborted) {
+    return Promise.reject(new Error(`Execution aborted: ${signal.reason ?? 'user signal'}`))
+  }
+  return new Promise((_, reject) => {
+    signal.addEventListener(
+      'abort',
+      () => reject(new Error(`Execution aborted: ${signal.reason ?? 'user signal'}`)),
+      { once: true }
+    )
+  })
+}
+
 export class ToolExecutionQueue {
   private tail: Promise<unknown> = Promise.resolve()
 
-  async run<T>(task: () => Promise<T>): Promise<T> {
-    const runTask = async () => task()
+  async run<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) {
+      throw new Error(`Execution aborted: ${signal.reason ?? 'user signal'}`)
+    }
+    const runTask = async () => Promise.race([task(), abortRejection(signal)])
     const result = this.tail.then(runTask, runTask)
     this.tail = result.catch(() => {})
     return result
@@ -13,25 +30,28 @@ export class ToolExecutionQueue {
 
 export const globalToolQueue = new ToolExecutionQueue()
 
+const MUTATING_TOOLS = new Set<string>(['WriteFile', 'EditFile', 'DeleteFile', 'Bash'])
+
 export async function executeWithPolicy<TInput, TOutput>(
-  toolName: ToolName,
+  toolName: ToolName | 'McpTool',
   input: TInput,
   context: ToolExecutionContext,
   action: (input: TInput, context: ToolExecutionContext) => Promise<TOutput>
 ): Promise<ToolExecutionResult<TOutput>> {
-  return globalToolQueue.run(async () => {
-    // 1. Abort signal check
+  const runner = async (): Promise<ToolExecutionResult<TOutput>> => {
     if (context.abortSignal?.aborted) {
       return {
         ok: false,
         output: null as unknown as TOutput,
-        error: `Execution of ${toolName} aborted by user signal.`,
+        error: toolName === 'McpTool' ? 'Execution aborted' : `Execution of ${toolName} aborted by user signal.`,
       }
     }
 
-    // 2. Execute with error boundary
     try {
-      const output = await action(input, context)
+      const output = await Promise.race([
+        action(input, context),
+        abortRejection(context.abortSignal),
+      ])
       return {
         ok: true,
         output,
@@ -44,5 +64,10 @@ export async function executeWithPolicy<TInput, TOutput>(
         error: errorMessage,
       }
     }
-  })
+  }
+
+  if (MUTATING_TOOLS.has(toolName)) {
+    return globalToolQueue.run(runner, context.abortSignal)
+  }
+  return runner()
 }

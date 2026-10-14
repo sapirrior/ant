@@ -27,7 +27,8 @@ describe('settings module', () => {
   })
 
   it('parses duration strings correctly', () => {
-    expect(parseDurationMs('100')).toBe(100)
+    expect(parseDurationMs('1000')).toBe(1000)
+    expect(() => parseDurationMs('100')).toThrow(/did you mean "100s"\?/i)
     expect(parseDurationMs('500ms')).toBe(500)
     expect(parseDurationMs('10s')).toBe(10000)
     expect(parseDurationMs('2.5s')).toBe(2500)
@@ -141,5 +142,11 @@ describe('settings module', () => {
     // Test parser for comma-separated and JSON string
     expect(KEYS['allow.mcp']!.parse('server/a, server/b')).toEqual(['server/a', 'server/b'])
     expect(KEYS['deny.mcp']!.parse('["server/x", "server/y"]')).toEqual(['server/x', 'server/y'])
+  })
+
+  it('throws when settings values are malformed or string booleans (B-014)', () => {
+    const settingsPath = join(testHome, 'settings.json')
+    writeFileSync(settingsPath, JSON.stringify({ allow: { bash: 'false' } }), 'utf-8')
+    expect(() => loadSettings()).toThrow(/allow\.bash/)
   })
 })

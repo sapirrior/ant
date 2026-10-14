@@ -1,9 +1,12 @@
 import type { Database } from 'bun:sqlite'
 import { randomBytes } from 'node:crypto'
 import { realpathSync } from 'node:fs'
+import { hostname } from 'node:os'
 import type { ModelMessage } from 'ai'
 import type { UsageSummary } from '../core/types.ts'
-import { pidAlive } from './db.ts'
+import { StoreError } from '../core/errors.ts'
+import { pidAlive } from '../utils/process.ts'
+import { writeTx } from './tx.ts'
 
 export interface ThreadRecord {
   id: string
@@ -72,8 +75,9 @@ export function generateThreadId(): string {
 
 export function formatTitle(input: string): string {
   const collapsed = input.trim().replace(/\s+/g, ' ')
-  if (collapsed.length <= 80) return collapsed
-  return collapsed.slice(0, 79) + '…'
+  const chars = Array.from(collapsed)
+  if (chars.length <= 80) return collapsed
+  return chars.slice(0, 79).join('') + '…'
 }
 
 export function createThread(
@@ -143,8 +147,8 @@ export function resolveThreadId(db: Database, idOrPrefix: string, cwd?: string):
 
   // Prefix match
   const candidates = db
-    .query('SELECT id FROM threads WHERE id LIKE ? ORDER BY updated_at DESC')
-    .all(`${idOrPrefix}%`) as { id: string }[]
+    .query('SELECT id FROM threads WHERE substr(id, 1, ?) = ? ORDER BY updated_at DESC, created_at DESC, id DESC')
+    .all(idOrPrefix.length, idOrPrefix) as { id: string }[]
 
   if (candidates.length === 0) {
     throw new Error(`Thread not found: "${idOrPrefix}"`)
@@ -194,7 +198,7 @@ export function listThreads(
         SELECT t.*,
           (SELECT COUNT(*) FROM checkpoints c WHERE c.thread_id = t.id) AS checkpoint_count
         FROM threads t
-        ORDER BY t.updated_at DESC
+        ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC
         LIMIT ?
         `
       )
@@ -214,7 +218,7 @@ export function listThreads(
           (SELECT COUNT(*) FROM checkpoints c WHERE c.thread_id = t.id) AS checkpoint_count
         FROM threads t
         WHERE t.cwd = ?
-        ORDER BY t.updated_at DESC
+        ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC
         LIMIT ?
         `
       )
@@ -231,24 +235,30 @@ export function renameThread(db: Database, idOrPrefix: string, newTitle: string,
     throw new Error(`Invalid title length (${cleaned.length} characters). Must be between 1 and 120 characters.`)
   }
 
-  db.run('UPDATE threads SET title = ?, updated_at = ? WHERE id = ?', [cleaned, Date.now(), id])
+  db.run('UPDATE threads SET title = ? WHERE id = ?', [cleaned, id])
   return getThread(db, id)
 }
 
 export function deleteThread(db: Database, idOrPrefix: string, cwd?: string): void {
   const id = resolveThreadId(db, idOrPrefix, cwd)
+  const host = hostname()
 
-  const row = db
-    .query('SELECT lock_pid FROM threads WHERE id = ?')
-    .get(id) as { lock_pid: number | null } | null
+  writeTx(db, () => {
+    const row = db
+      .query('SELECT lock_pid, lock_at, lock_host FROM threads WHERE id = ?')
+      .get(id) as { lock_pid: number | null; lock_at: number | null; lock_host: string | null } | null
 
-  if (row?.lock_pid !== null && row?.lock_pid !== undefined && pidAlive(row.lock_pid)) {
-    throw new Error(`Cannot delete thread ${id}: active lease held by pid ${row.lock_pid}`)
-  }
+    if (row?.lock_pid !== null && row?.lock_pid !== undefined) {
+      const isSameHost = row.lock_host === null || row.lock_host === host
+      const isAlive = isSameHost ? pidAlive(row.lock_pid) : true
+      const isStale = isSameHost && row.lock_at !== null && (Date.now() - row.lock_at > 30_000)
+      if (isAlive && !isStale) {
+        throw new Error(`Cannot delete thread ${id}: active lease held by pid ${row.lock_pid}`)
+      }
+    }
 
-  db.transaction(() => {
     db.run('DELETE FROM threads WHERE id = ?', [id])
-    // Clean unreferenced blobs (Blob GC §4.2)
+    // Clean unreferenced blobs
     db.run(
       `
       DELETE FROM blobs
@@ -259,14 +269,14 @@ export function deleteThread(db: Database, idOrPrefix: string, cwd?: string): vo
       )
       `
     )
-  })()
+  })
 }
 
 export function appendMessage(db: Database, threadId: string, message: ModelMessage): void {
   const jsonStr = JSON.stringify(message)
   const isUser = message.role === 'user'
 
-  db.transaction(() => {
+  writeTx(db, () => {
     const seqRow = db
       .query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE thread_id = ?')
       .get(threadId) as { max_seq: number }
@@ -288,15 +298,52 @@ export function appendMessage(db: Database, threadId: string, message: ModelMess
       `,
       [isUser ? 1 : 0, Date.now(), threadId]
     )
-  })()
+  })
+}
+
+export function appendMessages(db: Database, threadId: string, messages: readonly ModelMessage[]): void {
+  if (messages.length === 0) return
+
+  writeTx(db, () => {
+    let nextSeq = (
+      db.query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE thread_id = ?').get(threadId) as {
+        max_seq: number
+      }
+    ).max_seq
+
+    for (const msg of messages) {
+      nextSeq++
+      db.run('INSERT INTO messages (thread_id, seq, json) VALUES (?, ?, ?)', [
+        threadId,
+        nextSeq,
+        JSON.stringify(msg),
+      ])
+    }
+
+    db.run(
+      `
+      UPDATE threads
+      SET messages = messages + ?,
+          updated_at = ?
+      WHERE id = ?
+      `,
+      [messages.length, Date.now(), threadId]
+    )
+  })
 }
 
 export function getMessages(db: Database, threadId: string): ModelMessage[] {
   const rows = db
-    .query('SELECT json FROM messages WHERE thread_id = ? ORDER BY seq ASC')
-    .all(threadId) as { json: string }[]
+    .query('SELECT seq, json FROM messages WHERE thread_id = ? ORDER BY seq ASC')
+    .all(threadId) as { seq: number; json: string }[]
 
-  return rows.map((r) => JSON.parse(r.json) as ModelMessage)
+  return rows.map((r) => {
+    try {
+      return JSON.parse(r.json) as ModelMessage
+    } catch {
+      throw new StoreError(`thread ${threadId} message seq ${r.seq} is corrupt`)
+    }
+  })
 }
 
 export function recordStepMessages(
@@ -308,7 +355,7 @@ export function recordStepMessages(
 ): void {
   if (messages.length === 0 && stepsIncrement === 0) return
 
-  db.transaction(() => {
+  writeTx(db, () => {
     let nextSeq = (
       db.query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE thread_id = ?').get(threadId) as {
         max_seq: number
@@ -343,5 +390,5 @@ export function recordStepMessages(
         threadId,
       ]
     )
-  })()
+  })
 }

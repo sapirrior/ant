@@ -1,10 +1,11 @@
 import { Command } from 'commander'
-import { spawn } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { chmodSync, existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 import pkg from '../../package.json' with { type: 'json' }
-import { createColorFormatter } from '../output/color.ts'
+import { getAntHome } from '../paths.ts'
+import { notice } from '../output/notice.ts'
 
 const REPO = 'sapirrior/ant'
 
@@ -14,6 +15,18 @@ interface ReleaseInfo {
   body: string
 }
 
+function isNewer(latest: string, current: string): boolean {
+  const l = latest.split('.').map((n) => Number.parseInt(n, 10) || 0)
+  const c = current.split('.').map((n) => Number.parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(l.length, c.length); i++) {
+    const li = l[i] ?? 0
+    const ci = c[i] ?? 0
+    if (li > ci) return true
+    if (li < ci) return false
+  }
+  return false
+}
+
 async function fetchLatestRelease(): Promise<ReleaseInfo> {
   const url = `https://api.github.com/repos/${REPO}/releases/latest`
   const res = await fetch(url, {
@@ -21,6 +34,7 @@ async function fetchLatestRelease(): Promise<ReleaseInfo> {
       'User-Agent': `ant-cli/${pkg.version}`,
       Accept: 'application/vnd.github.v3+json',
     },
+    signal: AbortSignal.timeout(15000),
   })
 
   if (!res.ok) {
@@ -59,47 +73,40 @@ export function registerUpdateCommand(program: Command): void {
     .option('-c, --check', 'Check for updates without installing')
     .option('-f, --force', 'Force reinstall even if already on the latest version')
     .action(async (options: { check?: boolean; force?: boolean }) => {
-      const fmt = createColorFormatter()
-      const prefix = `${fmt.primary('[ant]')}`
-
       try {
-        process.stderr.write(`${prefix} ${fmt.muted('Checking for updates...')}\n`)
+        notice.info('Checking for updates...')
         const release = await fetchLatestRelease()
         const latestTag = release.tag_name || ''
         const latestVersion = latestTag.replace(/^v/, '')
         const currentVersion = pkg.version.replace(/^v/, '')
 
-        const isOutdated = latestVersion !== currentVersion
+        const isOutdated = isNewer(latestVersion, currentVersion)
 
         if (!isOutdated && !options.force) {
-          process.stdout.write(
-            `${fmt.success('✔')} ant is up to date (${fmt.secondary(`v${currentVersion}`)}).\n`
-          )
+          notice.done(`ant is up to date (v${currentVersion}).`)
           process.exitCode = 0
           return
         }
 
         if (options.check) {
           if (isOutdated) {
-            process.stdout.write(
-              `A new version of ant is available: ${fmt.secondary(`v${latestVersion}`)} ${fmt.muted(`(current: v${currentVersion})`)}\nRun ${fmt.primary('ant update')} to upgrade.\n`
+            notice.info(
+              `A new version of ant is available: v${latestVersion} (current: v${currentVersion})\nRun ant update to upgrade.`
             )
           } else {
-            process.stdout.write(`${fmt.success('✔')} ant is up to date (${fmt.secondary(`v${currentVersion}`)}).\n`)
+            notice.done(`ant is up to date (v${currentVersion}).`)
           }
           process.exitCode = 0
           return
         }
 
-        process.stderr.write(
-          `${prefix} Updating from ${fmt.muted(`v${currentVersion}`)} to ${fmt.secondary(`v${latestVersion}`)}...\n`
-        )
+        notice.info(`Updating from v${currentVersion} to v${latestVersion}...`)
 
         const asset = resolveAsset()
         const downloadUrl = `https://github.com/${REPO}/releases/download/${latestTag}/${asset}`
 
-        process.stderr.write(`${prefix} Downloading ${fmt.accent(asset)}...\n`)
-        const dlRes = await fetch(downloadUrl)
+        notice.info(`Downloading ${asset}...`)
+        const dlRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) })
         if (!dlRes.ok) {
           throw new Error(`Failed to download ${asset}: HTTP ${dlRes.status} ${dlRes.statusText}`)
         }
@@ -107,28 +114,66 @@ export function registerUpdateCommand(program: Command): void {
         const arrayBuffer = await dlRes.arrayBuffer()
         const buffer = Buffer.from(arrayBuffer)
 
-        // Target path is ~/.ant/bin/ant (or ~/.ant/bin/ant.exe on Windows)
-        const installDir = join(homedir(), '.ant', 'bin')
+        // Verify SHA-256 against checksums.txt if available
+        try {
+          const checksumRes = await fetch(
+            `https://github.com/${REPO}/releases/download/${latestTag}/checksums.txt`,
+            { signal: AbortSignal.timeout(15000) }
+          )
+          if (checksumRes.ok) {
+            const checksumsText = await checksumRes.text()
+            const match = checksumsText
+              .split('\n')
+              .map((l) => l.trim().split(/\s+/))
+              .find((parts) => parts[1] === asset)
+            if (match && match[0]) {
+              const expectedHash = match[0].toLowerCase()
+              const actualHash = createHash('sha256').update(buffer).digest('hex').toLowerCase()
+              if (expectedHash !== actualHash) {
+                throw new Error(`Checksum verification failed for ${asset}`)
+              }
+            }
+          }
+        } catch (checksumErr) {
+          if (checksumErr instanceof Error && checksumErr.message.includes('Checksum verification failed')) {
+            throw checksumErr
+          }
+        }
+
+        // Target path is ~/.ant/bin/ant (or ANT_HOME/bin/ant)
+        const installDir = join(getAntHome(), 'bin')
         mkdirSync(installDir, { recursive: true })
         const targetBin = join(installDir, process.platform === 'win32' ? 'ant.exe' : 'ant')
+        const tempBin = `${targetBin}.new`
 
-        writeFileSync(targetBin, buffer)
+        writeFileSync(tempBin, buffer)
         if (process.platform !== 'win32') {
-          chmodSync(targetBin, 0o755)
+          chmodSync(tempBin, 0o755)
+        }
+
+        if (process.platform === 'win32') {
+          const oldBin = `${targetBin}.old`
+          try {
+            if (existsSync(targetBin)) renameSync(targetBin, oldBin)
+          } catch {}
+          renameSync(tempBin, targetBin)
+          try {
+            if (existsSync(oldBin)) unlinkSync(oldBin)
+          } catch {}
+        } else {
+          renameSync(tempBin, targetBin)
         }
 
         // Run termux-fix-shebang if in Termux
         if (process.env.PREFIX && existsSync(`${process.env.PREFIX}/bin/termux-fix-shebang`)) {
-          spawn(`${process.env.PREFIX}/bin/termux-fix-shebang`, [targetBin], { stdio: 'ignore' })
+          spawnSync(`${process.env.PREFIX}/bin/termux-fix-shebang`, [targetBin], { stdio: 'ignore' })
         }
 
-        process.stdout.write(
-          `${fmt.success('✔')} Successfully updated ant to ${fmt.secondary(`v${latestVersion}`)}! ${fmt.muted(`(${targetBin})`)}\n`
-        )
+        notice.done(`Successfully updated ant to v${latestVersion}! (${targetBin})`)
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        process.stderr.write(`${prefix} ${fmt.error('error:')} ${msg}\n`)
+        notice.error(msg)
         process.exitCode = 1
       }
     })

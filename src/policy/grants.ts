@@ -5,6 +5,7 @@ export interface GrantOptions {
   readonly allowEdit?: boolean
   readonly allowBash?: boolean
   readonly allowDestructiveBash?: boolean
+  readonly allowSensitive?: boolean
 }
 
 export function resolveGrants(options: GrantOptions): Grants {
@@ -24,6 +25,10 @@ export function resolveGrants(options: GrantOptions): Grants {
 
   if (options.allowDestructiveBash) {
     caps.add('shell.destructive')
+  }
+
+  if (options.allowSensitive || options.allowDestructiveBash) {
+    caps.add('fs.sensitive')
   }
 
   const frozenSet = new Set(caps)

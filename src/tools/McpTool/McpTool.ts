@@ -1,15 +1,16 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { ToolExecutionContext, ToolExecutionResult } from '../../core/types.ts'
+import { executeWithPolicy } from '../pipeline.ts'
+import { MCP_TOOL_PROMPT } from './prompt.ts'
 import { McpClientManager } from '../../mcp/manager.ts'
 import { checkMcpToolPolicy } from '../../policy/mcp.ts'
-import { promptConfirmTTY } from '../../output/tty.ts'
-import { MCP_TOOL_PROMPT } from './prompt.ts'
+import { hasControllingTTY, promptConfirmTTY } from '../../output/tty.ts'
 
-const mcpInputSchema = z.object({
-  action: z.enum(['list_servers', 'list_tools', 'call']).describe('The action to perform'),
-  server: z.string().optional().describe('Target MCP server name (required for "list_tools" and "call")'),
-  tool: z.string().optional().describe('Target tool name on the MCP server (required for "call")'),
+export const mcpInputSchema = z.object({
+  action: z.enum(['list_servers', 'list_tools', 'call']).describe('The MCP action to perform'),
+  server: z.string().optional().describe('The name of the target MCP server'),
+  tool: z.string().optional().describe('The tool name to execute on the server (for "call")'),
   args: z.record(z.string(), z.unknown()).optional().describe('Arguments to pass to the MCP tool (for "call")'),
 })
 
@@ -19,19 +20,12 @@ export function createMcpTool(context: ToolExecutionContext) {
   return tool({
     description: MCP_TOOL_PROMPT,
     inputSchema: mcpInputSchema,
-    execute: async (input, { abortSignal }): Promise<ToolExecutionResult> => {
-      const signal = abortSignal ?? context.abortSignal
-      if (signal?.aborted) {
-        return {
-          ok: false,
-          output: null,
-          error: 'Execution aborted',
-        }
-      }
-
-      switch (input.action) {
-        case 'list_servers': {
-          try {
+    execute: async (input, { abortSignal }: { abortSignal?: AbortSignal } = {}): Promise<ToolExecutionResult> => {
+      const mergedContext = abortSignal ? { ...context, abortSignal } : context
+      return executeWithPolicy('McpTool', input, mergedContext, async () => {
+        const signal = mergedContext.abortSignal
+        switch (input.action) {
+          case 'list_servers': {
             const serversMap = manager.getServers()
             const servers = Array.from(serversMap.values()).map((s) => ({
               name: s.name,
@@ -40,134 +34,91 @@ export function createMcpTool(context: ToolExecutionContext) {
               enabled: s.enabled,
             }))
             return {
-              ok: true,
-              output: {
-                count: servers.length,
-                servers,
-              },
-            }
-          } catch (err) {
-            return {
-              ok: false,
-              output: null,
-              error: err instanceof Error ? err.message : String(err),
-            }
-          }
-        }
-
-        case 'list_tools': {
-          if (!input.server) {
-            return {
-              ok: false,
-              output: null,
-              error: 'Missing required parameter "server" for action "list_tools"',
+              count: servers.length,
+              servers,
             }
           }
 
-          try {
+          case 'list_tools': {
+            if (!input.server) {
+              throw new Error('Missing required parameter "server" for action "list_tools"')
+            }
+
             const tools = await manager.listTools(input.server)
             return {
-              ok: true,
-              output: {
-                server: input.server,
-                tools,
-              },
-            }
-          } catch (err) {
-            return {
-              ok: false,
-              output: null,
-              error: err instanceof Error ? err.message : String(err),
-            }
-          }
-        }
-
-        case 'call': {
-          if (!input.server) {
-            return {
-              ok: false,
-              output: null,
-              error: 'Missing required parameter "server" for action "call"',
+              server: input.server,
+              tools,
             }
           }
 
-          if (!input.tool) {
-            return {
-              ok: false,
-              output: null,
-              error: 'Missing required parameter "tool" for action "call"',
+          case 'call': {
+            if (!input.server) {
+              throw new Error('Missing required parameter "server" for action "call"')
             }
-          }
 
-          // Authorization policy check: allowed vs explicitly denied vs ask confirmation
-          const verdict = checkMcpToolPolicy(
-            input.server,
-            input.tool,
-            context.allowedMcpPatterns ?? [],
-            context.deniedMcpPatterns ?? []
-          )
-
-          if (verdict.status === 'denied') {
-            return {
-              ok: false,
-              output: null,
-              error: `MCP tool execution denied by policy: ${verdict.reason}. Do not attempt to retry.`,
+            if (!input.tool) {
+              throw new Error('Missing required parameter "tool" for action "call"')
             }
-          }
 
-          if (verdict.status === 'ask') {
-            const promptArgs = JSON.stringify(input.args ?? {}, null, 2)
-            const confirmed = context.ui?.confirm
-              ? context.ui.confirm({
-                  message: `MCP tool wants to run: ${input.server}/${input.tool}`,
-                  command: promptArgs,
-                  reason: verdict.reason,
-                })
-              : promptConfirmTTY({
-                  message: `MCP tool wants to run: ${input.server}/${input.tool}`,
-                  command: promptArgs,
-                  reason: verdict.reason,
-                })
+            // Authorization policy check: allowed vs explicitly denied vs ask confirmation
+            const verdict = checkMcpToolPolicy(
+              input.server,
+              input.tool,
+              context.allowedMcpPatterns ?? [],
+              context.deniedMcpPatterns ?? []
+            )
 
-            if (!confirmed) {
-              return {
-                ok: false,
-                output: null,
-                error: `User denied permission to execute MCP tool "${input.server}/${input.tool}". Do not retry without user approval.`,
+            if (verdict.status === 'denied') {
+              throw new Error(`MCP tool execution denied by policy: ${verdict.reason}. Do not attempt to retry.`)
+            }
+
+            if (verdict.status === 'ask') {
+              const promptArgs = JSON.stringify(input.args ?? {}, null, 2)
+              const hasTTY = hasControllingTTY()
+              if (!context.ui?.confirm && !hasTTY) {
+                throw new Error(
+                  `No terminal available for interactive confirmation. Pre-approve with --allow-mcp "${input.server}/${input.tool}".`
+                )
+              }
+
+              const confirmed = await (context.ui?.confirm
+                ? Promise.resolve(
+                    context.ui.confirm({
+                      message: `MCP tool wants to run: ${input.server}/${input.tool}`,
+                      command: promptArgs,
+                      reason: verdict.reason,
+                    })
+                  )
+                : promptConfirmTTY({
+                    message: `MCP tool wants to run: ${input.server}/${input.tool}`,
+                    command: promptArgs,
+                    reason: verdict.reason,
+                    signal: context.abortSignal,
+                  }))
+
+              if (!confirmed) {
+                throw new Error(
+                  `User denied permission to execute MCP tool "${input.server}/${input.tool}". Do not retry without user approval.`
+                )
               }
             }
-          }
 
-          if (signal?.aborted) {
-            return {
-              ok: false,
-              output: null,
-              error: 'Execution aborted',
+            if (signal?.aborted) {
+              throw new Error('Execution aborted')
             }
-          }
 
-          const result = await manager.callTool(input.server, input.tool, input.args ?? {})
-          if (!result.ok) {
-            return {
-              ok: false,
-              output: null,
-              error: result.error ?? 'Unknown error executing MCP tool',
+            const result = await manager.callTool(input.server, input.tool, input.args ?? {})
+            if (!result.ok) {
+              throw new Error(result.error ?? 'Unknown error executing MCP tool')
             }
+
+            return result.output
           }
 
-          return {
-            ok: true,
-            output: result.output,
-          }
+          default:
+            throw new Error(`Unsupported action "${(input as any).action}"`)
         }
-
-        default:
-          return {
-            ok: false,
-            output: null,
-            error: `Unsupported action "${(input as any).action}"`,
-          }
-      }
+      })
     },
   })
 }

@@ -1,9 +1,8 @@
 /**
- * Signals and abort reason helpers per Plan Phase 1 (B2 fix).
+ * Signals and abort reason helpers.
  *
- * Verification notes from Phase 0:
- * - Bun 1.4+: signal.reason is a read-only getter on EventTarget/AbortSignal.
- * - controller.abort(reason) correctly sets signal.reason to the passed value.
+ * Bun 1.4+: signal.reason is a read-only getter on EventTarget/AbortSignal.
+ * controller.abort(reason) sets signal.reason to the passed value.
  */
 
 export type AbortReason = 'SIGINT' | 'SIGTERM' | 'SIGHUP' | 'timeout'

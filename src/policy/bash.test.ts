@@ -81,12 +81,23 @@ describe('bash allowlist classifier', () => {
     'echo ok > /dev/null',
     'ls 2>&1',
     'git status 2>&1',
+    'ls >/dev/null',
+    'ls 2>/dev/null',
+    'ls 2>&1 >/dev/null',
     'grep -E "foo|bar" package.json',
     'jq \'.name | .\' package.json',
     'echo "a > b"',
   ]
 
   const askCases = [
+    'ls 2>x',
+    'ls 1>x',
+    'ls 2>>x',
+    'ls &>x',
+    'ls >|x',
+    'cat < .env',
+    'cat <(rm -rf build)',
+    'cat .en*',
     'rm x',
     'rm -rf build',
     '/bin/rm x',

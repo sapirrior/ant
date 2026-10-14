@@ -24,15 +24,33 @@ export function createListDirTool(context: ToolExecutionContext) {
         }
 
         const entries = await readdir(fullPath, { withFileTypes: true })
-        const formatted = entries.map((entry) => ({
+        const sorted = entries.sort((a, b) => {
+          const aDir = a.isDirectory() ? 0 : 1
+          const bDir = b.isDirectory() ? 0 : 1
+          if (aDir !== bDir) return aDir - bDir
+          return a.name.localeCompare(b.name)
+        })
+
+        const truncated = sorted.length > 1000
+        const slice = truncated ? sorted.slice(0, 1000) : sorted
+
+        const formatted = slice.map((entry) => ({
           name: entry.name,
-          type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
+          type: entry.isDirectory()
+            ? 'directory'
+            : entry.isFile()
+            ? 'file'
+            : entry.isSymbolicLink()
+            ? 'symlink'
+            : 'other',
         }))
 
         return {
           path,
           entries: formatted,
           count: formatted.length,
+          totalEntries: sorted.length,
+          truncated: truncated || undefined,
         }
       })
     },

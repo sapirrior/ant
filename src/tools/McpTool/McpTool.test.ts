@@ -148,4 +148,28 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Execution aborted')
   })
+
+  it('supports glob allow and deny patterns per B-036', async () => {
+    const fakeManager: any = {
+      callTool: async (server: string, t: string, _args: any) => ({ ok: true, output: { server, t } }),
+    }
+    const mockContext: ToolExecutionContext = {
+      cwd: process.cwd(),
+      grants: dummyGrants,
+      mcpManager: fakeManager,
+      allowedMcpPatterns: ['db/*', '*/read_*'],
+      deniedMcpPatterns: ['db/drop_*'],
+    }
+
+    const tool = createMcpTool(mockContext)
+
+    // db/drop_table should be denied by db/drop_*
+    const resDenied = await (tool.execute as any)({ action: 'call', server: 'db', tool: 'drop_table' }, { messages: [] })
+    expect(resDenied.ok).toBe(false)
+    expect(resDenied.error).toContain('denied by policy')
+
+    // x/read_file should be allowed by */read_*
+    const resAllowed = await (tool.execute as any)({ action: 'call', server: 'x', tool: 'read_file' }, { messages: [] })
+    expect(resAllowed.ok).toBe(true)
+  })
 })

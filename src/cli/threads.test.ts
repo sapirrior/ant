@@ -85,7 +85,7 @@ describe('ant threads CLI command', () => {
     const program = createProgram()
     await program.parseAsync(['node', 'ant', 'threads', 'rename', t.id, 'New', 'title', 'here'])
 
-    expect(stdoutBuf).toContain(`renamed thread ${t.id} to "New title here"`)
+    expect(stderrBuf).toContain(`renamed thread ${t.id} to "New title here"`)
   })
 
   it('deletes a thread with -y', async () => {
@@ -96,6 +96,6 @@ describe('ant threads CLI command', () => {
     const program = createProgram()
     await program.parseAsync(['node', 'ant', 'threads', 'delete', t.id, '-y'])
 
-    expect(stdoutBuf).toContain(`deleted thread ${t.id}`)
+    expect(stderrBuf).toContain(`deleted thread ${t.id}`)
   })
 })

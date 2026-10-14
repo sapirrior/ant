@@ -8,25 +8,12 @@ import {
   renameThread,
   type ThreadRecord,
 } from '../store/threads.ts'
-import { pidAlive } from '../store/db.ts'
 import { createInterface } from 'node:readline/promises'
-
-function formatTimeAgo(timestampMs: number): string {
-  const diffSec = Math.floor((Date.now() - timestampMs) / 1000)
-  if (diffSec < 60) return 'just now'
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}h ago`
-  const diffDays = Math.floor(diffHour / 24)
-  return `${diffDays}d ago`
-}
-
-function formatTokens(count: number): string {
-  if (count >= 1000000) return `${(count / 1000000).toFixed(1)}m`
-  if (count >= 1000) return `${(count / 1000).toFixed(1)}k`
-  return `${count}`
-}
+import { formatTimeAgo, formatTokens } from '../utils/format.ts'
+import { parseIntStrict } from '../utils/number.ts'
+import { pidAlive } from '../utils/process.ts'
+import { displayPath } from '../output/paths.ts'
+import { notice } from '../output/notice.ts'
 
 function renderTable(threads: readonly ThreadRecord[], showCwd: boolean): string {
   if (threads.length === 0) {
@@ -42,7 +29,8 @@ function renderTable(threads: readonly ThreadRecord[], showCwd: boolean): string
     const ckpts = String(t.checkpointCount ?? 0)
     const tokens = `${formatTokens(t.inputTokens)} / ${formatTokens(t.outputTokens)}`
     const title = t.title
-    return { idDisplay, updated, turns, msgs, ckpts, tokens, title, cwd: t.cwd }
+    const cwd = displayPath(t.cwd)
+    return { idDisplay, updated, turns, msgs, ckpts, tokens, title, cwd }
   })
 
   // Calculate column widths
@@ -64,17 +52,11 @@ function renderTable(threads: readonly ThreadRecord[], showCwd: boolean): string
     if (r.cwd.length > wCwd) wCwd = r.cwd.length
   }
 
-  let out = ''
-  if (showCwd) {
-    out += `${'ID'.padEnd(wId)}  ${'UPDATED'.padEnd(wUp)}  ${'TURNS'.padStart(wTu)}  ${'MSGS'.padStart(wMs)}  ${'CKPTS'.padStart(wCk)}  ${'TOKENS (in/out)'.padEnd(wTk)}  ${'CWD'.padEnd(wCwd)}  TITLE\n`
-    for (const r of rows) {
-      out += `${r.idDisplay.padEnd(wId)}  ${r.updated.padEnd(wUp)}  ${r.turns.padStart(wTu)}  ${r.msgs.padStart(wMs)}  ${r.ckpts.padStart(wCk)}  ${r.tokens.padEnd(wTk)}  ${r.cwd.padEnd(wCwd)}  ${r.title}\n`
-    }
-  } else {
-    out += `${'ID'.padEnd(wId)}  ${'UPDATED'.padEnd(wUp)}  ${'TURNS'.padStart(wTu)}  ${'MSGS'.padStart(wMs)}  ${'CKPTS'.padStart(wCk)}  ${'TOKENS (in/out)'.padEnd(wTk)}  TITLE\n`
-    for (const r of rows) {
-      out += `${r.idDisplay.padEnd(wId)}  ${r.updated.padEnd(wUp)}  ${r.turns.padStart(wTu)}  ${r.msgs.padStart(wMs)}  ${r.ckpts.padStart(wCk)}  ${r.tokens.padEnd(wTk)}  ${r.title}\n`
-    }
+  const colHeader = showCwd ? `${'CWD'.padEnd(wCwd)}  ` : ''
+  let out = `${'ID'.padEnd(wId)}  ${'UPDATED'.padEnd(wUp)}  ${'TURNS'.padStart(wTu)}  ${'MSGS'.padStart(wMs)}  ${'CKPTS'.padStart(wCk)}  ${'TOKENS (in/out)'.padEnd(wTk)}  ${colHeader}TITLE\n`
+  for (const r of rows) {
+    const colVal = showCwd ? `${r.cwd.padEnd(wCwd)}  ` : ''
+    out += `${r.idDisplay.padEnd(wId)}  ${r.updated.padEnd(wUp)}  ${r.turns.padStart(wTu)}  ${r.msgs.padStart(wMs)}  ${r.ckpts.padStart(wCk)}  ${r.tokens.padEnd(wTk)}  ${colVal}${r.title}\n`
   }
   return out
 }
@@ -91,11 +73,11 @@ export function registerThreadsCommand(program: Command): void {
     .action((options) => {
       const db = openDb()
       try {
-        const limit = Number.parseInt(options.limit, 10)
+        const limit = parseIntStrict('limit', options.limit, { min: 1 })
         const records = listThreads(db, {
           cwd: process.cwd(),
           all: Boolean(options.all),
-          limit: Number.isNaN(limit) ? 20 : limit,
+          limit,
         })
 
         if (options.json) {
@@ -109,6 +91,9 @@ export function registerThreadsCommand(program: Command): void {
         } else {
           process.stdout.write(renderTable(records, Boolean(options.all)))
         }
+      } catch (err) {
+        notice.error(err instanceof Error ? err.message : String(err))
+        process.exitCode = 1
       } finally {
         db.close()
       }
@@ -179,7 +164,7 @@ export function registerThreadsCommand(program: Command): void {
 
         process.stdout.write(out)
       } catch (err) {
-        process.stderr.write(`[ant] error: ${err instanceof Error ? err.message : String(err)}\n`)
+        notice.error(err instanceof Error ? err.message : String(err))
         process.exitCode = 1
       } finally {
         db.close()
@@ -194,9 +179,9 @@ export function registerThreadsCommand(program: Command): void {
       try {
         const fullTitle = titleParts.join(' ')
         const updated = renameThread(db, idOrPrefix, fullTitle, process.cwd())
-        process.stdout.write(`[ant] renamed thread ${updated.id} to "${updated.title}"\n`)
+        notice.info(`renamed thread ${updated.id} to "${updated.title}"`)
       } catch (err) {
-        process.stderr.write(`[ant] error: ${err instanceof Error ? err.message : String(err)}\n`)
+        notice.error(err instanceof Error ? err.message : String(err))
         process.exitCode = 1
       } finally {
         db.close()
@@ -214,7 +199,7 @@ export function registerThreadsCommand(program: Command): void {
 
         if (!options.yes) {
           if (!process.stdin.isTTY) {
-            process.stderr.write('[ant] error: deletion requires confirmation (-y)\n')
+            notice.error('deletion requires confirmation (-y)')
             process.exitCode = 2
             return
           }
@@ -232,9 +217,9 @@ export function registerThreadsCommand(program: Command): void {
         }
 
         deleteThread(db, thread.id, process.cwd())
-        process.stdout.write(`[ant] deleted thread ${thread.id}\n`)
+        notice.info(`deleted thread ${thread.id}`)
       } catch (err) {
-        process.stderr.write(`[ant] error: ${err instanceof Error ? err.message : String(err)}\n`)
+        notice.error(err instanceof Error ? err.message : String(err))
         process.exitCode = 1
       } finally {
         db.close()

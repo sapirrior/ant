@@ -111,7 +111,7 @@ describe('ant checkpoints CLI command', () => {
       const program = createProgram()
       await program.parseAsync(['node', 'ant', 'checkpoints', 'restore', '2', '--thread', t.id])
 
-      expect(stdoutBuf).toContain('restored workspace to before checkpoint #2')
+      expect(stderrBuf).toContain('restored workspace to before checkpoint #2')
       expect(readFileSync(file, 'utf-8')).toBe('v1')
     } finally {
       process.chdir(origCwd)

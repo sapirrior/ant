@@ -1,4 +1,6 @@
-import { openSync, readSync, writeSync, closeSync } from 'node:fs'
+import { openSync, closeSync } from 'node:fs'
+import fs from 'node:fs'
+import readline from 'node:readline'
 import { createColorFormatter, type ColorLevel } from './color.ts'
 
 export interface ConfirmPromptOptions {
@@ -6,6 +8,7 @@ export interface ConfirmPromptOptions {
   command?: string
   reason?: string
   colorLevel?: ColorLevel
+  signal?: AbortSignal
 }
 
 export function hasControllingTTY(): boolean {
@@ -18,81 +21,70 @@ export function hasControllingTTY(): boolean {
   }
 }
 
-export function promptConfirmTTY(options: ConfirmPromptOptions): boolean {
-  let fd: number | null = null
+export async function promptConfirmTTY(options: ConfirmPromptOptions): Promise<boolean> {
+  let stream: fs.ReadStream
   try {
-    fd = openSync('/dev/tty', 'r+')
+    stream = fs.createReadStream('/dev/tty')
   } catch {
     return false // No terminal available
   }
 
   const fmt = createColorFormatter(options.colorLevel)
+  const reasonStr = options.reason ? ` ${fmt.muted(`(${options.reason})`)}` : ''
+  let promptText = `${fmt.warning('?')} ${options.message}${reasonStr}\n`
 
-  try {
-    const reasonStr = options.reason ? ` ${fmt.muted(`(${options.reason})`)}` : ''
-    let promptText = `${fmt.warning('?')} ${options.message}${reasonStr}\n`
+  if (options.command) {
+    const lines = options.command.split('\n')
+    const preview = lines.slice(0, 20).join('\n')
+    promptText += `  $ ${fmt.text(preview)}\n`
+    if (lines.length > 20) {
+      promptText += `  ${fmt.muted(`... (${lines.length - 20} more lines)`)}\n`
+    }
+  }
 
-    if (options.command) {
-      const lines = options.command.split('\n')
-      const preview = lines.slice(0, 20).join('\n')
-      promptText += `  $ ${fmt.text(preview)}\n`
-      if (lines.length > 20) {
-        promptText += `  ${fmt.muted(`... (${lines.length - 20} more lines)`)}\n`
+  promptText += `  ${fmt.warning('Allow? [y/N]')} `
+  process.stderr.write(promptText)
+
+  const rl = readline.createInterface({
+    input: stream,
+    output: process.stderr,
+    terminal: true,
+  })
+
+  return new Promise<boolean>((resolve) => {
+    let resolved = false
+    const done = (val: boolean) => {
+      if (!resolved) {
+        resolved = true
+        rl.close()
+        stream.destroy()
+        resolve(val)
       }
     }
 
-    promptText += `  ${fmt.warning('Allow? [y/N]')} `
-
-    writeSync(fd, Buffer.from(promptText, 'utf-8'))
-
-    const buf = Buffer.alloc(256)
-    const bytesRead = readSync(fd, buf, 0, 256, null)
-    const input = buf.toString('utf-8', 0, bytesRead).trim().toLowerCase()
-
-    return input === 'y' || input === 'yes'
-  } catch {
-    return false
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd)
-      } catch {
-        // ignore close error
-      }
+    if (options.signal?.aborted) {
+      done(false)
+      return
     }
-  }
+
+    const abortHandler = () => done(false)
+    options.signal?.addEventListener('abort', abortHandler, { once: true })
+
+    const timeoutMs = Number(process.env.ANT_CONFIRM_TIMEOUT_MS) || 60_000
+    const timer = setTimeout(() => done(false), timeoutMs)
+    timer.unref()
+
+    rl.on('line', (line) => {
+      clearTimeout(timer)
+      if (options.signal) options.signal.removeEventListener('abort', abortHandler)
+      const input = line.trim().toLowerCase()
+      done(input === 'y' || input === 'yes')
+    })
+
+    rl.on('close', () => {
+      clearTimeout(timer)
+      done(false)
+    })
+  })
 }
 
-export function promptAskTTY(question: string, colorLevel?: ColorLevel): string | null {
-  let fd: number | null = null
-  try {
-    fd = openSync('/dev/tty', 'r+')
-  } catch {
-    return null // No terminal available
-  }
-
-  const fmt = createColorFormatter(colorLevel)
-
-  try {
-    const promptText = `\n${fmt.primary('?')} ${optionsClean(question)}\n> `
-    writeSync(fd, Buffer.from(promptText, 'utf-8'))
-
-    const buf = Buffer.alloc(4096)
-    const bytesRead = readSync(fd, buf, 0, 4096, null)
-    return buf.toString('utf-8', 0, bytesRead).trim()
-  } catch {
-    return null
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd)
-      } catch {
-        // ignore close error
-      }
-    }
-  }
-}
-
-function optionsClean(str: string): string {
-  return str.replace(/\r?\n/g, ' ').trim()
-}

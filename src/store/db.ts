@@ -1,11 +1,12 @@
 import { Database } from 'bun:sqlite'
 import { existsSync, mkdirSync, openSync, closeSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
-
-export function getAntHome(): string {
-  return process.env.ANT_HOME ?? join(homedir(), '.ant')
-}
+import { writeTx } from './tx.ts'
+import { getAntHome } from '../paths.ts'
+import { pidAlive } from '../utils/process.ts'
+export { getAntHome } from '../paths.ts'
+export { pidAlive } from '../utils/process.ts'
 
 export function getDbPath(): string {
   return join(getAntHome(), 'ant.db')
@@ -68,20 +69,12 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE threads ADD COLUMN last_status TEXT;
   ALTER TABLE threads ADD COLUMN last_exit_code INTEGER;
   `,
+  // Migration 3: Lease host tracking & checkpoint before_mode
+  `
+  ALTER TABLE threads ADD COLUMN lock_host TEXT;
+  ALTER TABLE checkpoint_files ADD COLUMN before_mode INTEGER;
+  `,
 ]
-
-export function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'code' in err) {
-      const code = (err as { code: string }).code
-      return code === 'EPERM'
-    }
-    return false
-  }
-}
 
 export function openDb(customPath?: string): Database {
   const dbPath = customPath ?? getDbPath()
@@ -100,9 +93,9 @@ export function openDb(customPath?: string): Database {
 
   const db = new Database(dbPath)
 
-  // Configure Pragmas on every open
-  db.run('PRAGMA journal_mode = WAL;')
+  // Configure Pragmas on every open: busy_timeout first, then WAL
   db.run('PRAGMA busy_timeout = 5000;')
+  db.run('PRAGMA journal_mode = WAL;')
   db.run('PRAGMA foreign_keys = ON;')
   db.run('PRAGMA synchronous = NORMAL;')
 
@@ -127,36 +120,42 @@ export function openDb(customPath?: string): Database {
 }
 
 export function acquireLease(db: Database, threadId: string): void {
-  db.transaction(() => {
+  const host = hostname()
+  writeTx(db, () => {
     const row = db
-      .query('SELECT lock_pid, lock_at FROM threads WHERE id = ?')
-      .get(threadId) as { lock_pid: number | null; lock_at: number | null } | null
+      .query('SELECT lock_pid, lock_at, lock_host FROM threads WHERE id = ?')
+      .get(threadId) as { lock_pid: number | null; lock_at: number | null; lock_host: string | null } | null
 
     if (!row) {
       throw new Error(`Thread not found: "${threadId}"`)
     }
 
     if (row.lock_pid !== null) {
-      if (row.lock_pid === process.pid) {
+      if (row.lock_pid === process.pid && (row.lock_host === null || row.lock_host === host)) {
         return
       }
-      if (pidAlive(row.lock_pid)) {
+      const isSameHost = row.lock_host === null || row.lock_host === host
+      const isDead = isSameHost ? !pidAlive(row.lock_pid) : false
+      const isStale = isSameHost && row.lock_at !== null && (Date.now() - row.lock_at > 30_000)
+
+      if (!isDead && !isStale) {
         const timeStr = row.lock_at ? new Date(row.lock_at).toISOString() : 'unknown time'
-        throw new Error(`thread ${threadId} is in use by pid ${row.lock_pid} since ${timeStr}`)
+        const hostStr = row.lock_host ? ` on ${row.lock_host}` : ''
+        throw new Error(`thread ${threadId} is in use by pid ${row.lock_pid}${hostStr} since ${timeStr}`)
       }
-      // Process is dead, lease can be taken over
     }
 
-    db.run('UPDATE threads SET lock_pid = ?, lock_at = ? WHERE id = ?', [
+    db.run('UPDATE threads SET lock_pid = ?, lock_at = ?, lock_host = ? WHERE id = ?', [
       process.pid,
       Date.now(),
+      host,
       threadId,
     ])
-  })()
+  })
 }
 
 export function releaseLease(db: Database, threadId: string): void {
-  db.run('UPDATE threads SET lock_pid = NULL, lock_at = NULL WHERE id = ? AND lock_pid = ?', [
+  db.run('UPDATE threads SET lock_pid = NULL, lock_at = NULL, lock_host = NULL WHERE id = ? AND lock_pid = ?', [
     threadId,
     process.pid,
   ])

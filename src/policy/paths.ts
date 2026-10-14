@@ -41,3 +41,12 @@ export function resolveWithinRoot(targetPath: string, rootDir: string): string {
 
   return resolvedTarget
 }
+
+/**
+ * Normalises a workspace-contained path to a relative POSIX path from rootDir.
+ */
+export function relToRoot(rootDir: string, absOrRel: string): string {
+  const rel = relative(rootDir, absOrRel)
+  return rel ? rel.split(sep).join('/') : '.'
+}
+

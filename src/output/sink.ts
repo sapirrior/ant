@@ -1,4 +1,5 @@
 import type { ModelOutcome, OutputFormat, RunEvent } from '../core/types.ts'
+import type { ColorLevel, ThemeMode } from './color.ts'
 import pkg from '../../package.json' with { type: 'json' }
 import { StreamingMarkdownRenderer } from './markdown.ts'
 import {
@@ -15,14 +16,17 @@ export interface OutputSinkOptions {
   model?: string
   effort?: string
   startTime?: number
+  colorLevel?: ColorLevel
+  theme?: ThemeMode
 }
 
 export interface OutputSink {
   onEvent(event: RunEvent): void
   finish(outcome: ModelOutcome, meta?: Partial<OutputSinkOptions>): void
+  ensureLineStart?(): void
 }
 
-function truncatePayload(payload: unknown, maxChars = 65536): { data: unknown; truncated?: boolean } {
+function truncatePayload(payload: unknown, maxChars = 65536): { data: unknown; truncated?: boolean; originalSize?: number } {
   if (payload === undefined || payload === null) {
     return { data: payload }
   }
@@ -40,13 +44,15 @@ function truncatePayload(payload: unknown, maxChars = 65536): { data: unknown; t
     }
   }
 
-  if (serialized.length <= maxChars) {
+  const chars = Array.from(serialized)
+  if (chars.length <= maxChars) {
     return { data: payload }
   }
 
   return {
-    data: serialized.slice(0, maxChars) + '... [truncated]',
+    data: chars.slice(0, maxChars).join('') + '... [truncated]',
     truncated: true,
+    originalSize: chars.length,
   }
 }
 
@@ -71,7 +77,20 @@ export function buildResultEnvelope(
     warnings: [],
   }
 
-  return ResultSchema.parse(raw)
+  const parsed = ResultSchema.safeParse(raw)
+  if (parsed.success) {
+    return parsed.data
+  }
+
+  return {
+    schemaVersion: 1,
+    status: outcome.status,
+    exitCode: outcome.exitCode,
+    text: outcome.text ?? '',
+    steps: outcome.stepsExecuted ?? 0,
+    checkpoints: meta?.checkpoints ?? [],
+    warnings: [`Schema validation warning: ${parsed.error.message}`],
+  }
 }
 
 export class JsonSink implements OutputSink {
@@ -120,6 +139,7 @@ export class StreamJsonSink implements OutputSink {
     grants: string[]
     tools: string[]
     resumed: boolean
+    modelChangedFrom?: string | null
   }): void {
     this.writeLine({
       type: 'init',
@@ -138,18 +158,19 @@ export class StreamJsonSink implements OutputSink {
         break
       }
       case 'tool-call': {
-        const { data, truncated } = truncatePayload(event.input)
+        const { data, truncated, originalSize } = truncatePayload(event.input)
         this.writeLine({
           type: 'tool_call',
           callId: event.callId,
           name: event.toolName,
           input: data,
           truncated,
+          originalSize,
         })
         break
       }
       case 'tool-result': {
-        const { data, truncated } = truncatePayload(event.output)
+        const { data, truncated, originalSize } = truncatePayload(event.output)
         const ok = !event.isError
         this.writeLine({
           type: 'tool_result',
@@ -160,6 +181,7 @@ export class StreamJsonSink implements OutputSink {
           durationMs: event.durationMs,
           output: data,
           truncated,
+          originalSize,
         })
         break
       }
@@ -187,6 +209,8 @@ export class StreamJsonSink implements OutputSink {
     StreamResultEventSchema.parse(resultEvent)
     process.stdout.write(JSON.stringify(resultEvent) + '\n')
   }
+
+  ensureLineStart(): void {}
 }
 
 export class TextSink implements OutputSink {
@@ -201,6 +225,13 @@ export class TextSink implements OutputSink {
     if (this.isTTY && event.type === 'text-delta') {
       process.stdout.write(event.delta)
       this.atLineStart = event.delta.endsWith('\n')
+    }
+  }
+
+  ensureLineStart(): void {
+    if (!this.atLineStart) {
+      process.stdout.write('\n')
+      this.atLineStart = true
     }
   }
 
@@ -219,11 +250,19 @@ export class TextSink implements OutputSink {
 
 export class MarkdownSink implements OutputSink {
   private isTTY: boolean
-  private renderer = new StreamingMarkdownRenderer()
+  private renderer: StreamingMarkdownRenderer
   private atLineStart = true
 
-  constructor(isTTY: boolean) {
+  constructor(isTTY: boolean, colorLevel?: ColorLevel, theme?: ThemeMode) {
     this.isTTY = isTTY
+    this.renderer = new StreamingMarkdownRenderer({ colorLevel, theme })
+  }
+
+  ensureLineStart(): void {
+    if (!this.atLineStart) {
+      process.stdout.write('\n')
+      this.atLineStart = true
+    }
   }
 
   onEvent(event: RunEvent): void {
@@ -261,7 +300,7 @@ export function createOutputSink(options: OutputSinkOptions): OutputSink {
     case 'stream-json':
       return new StreamJsonSink(options)
     case 'md':
-      return new MarkdownSink(options.isStdoutTTY)
+      return new MarkdownSink(options.isStdoutTTY, options.colorLevel, options.theme)
     case 'text':
     default:
       return new TextSink(options.isStdoutTTY)
