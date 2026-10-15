@@ -1,6 +1,7 @@
 import { marked, type Token, type Tokens } from 'marked'
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight'
 import { createColorFormatter, type ColorLevel, type ThemeMode } from './color.ts'
+import { visibleWidth } from '../utils/format.ts'
 
 export interface MarkdownOptions {
   columns?: number
@@ -210,7 +211,7 @@ export function stripAnsi(text: string): string {
 }
 
 export function stringWidth(text: string): number {
-  return stripAnsi(text).length
+  return visibleWidth(text)
 }
 
 export function getTerminalColumns(): number {
