@@ -156,4 +156,13 @@ describe('settings module', () => {
     const loaded = loadSettings()
     expect(loaded.output).toBeUndefined()
   })
+
+  it('recognizes output setting without warning', () => {
+    const settingsPath = join(testHome, 'settings.json')
+    writeFileSync(settingsPath, JSON.stringify({ output: 'md' }), 'utf-8')
+    const warnings: string[] = []
+    const loaded = loadSettings({ warn: (w) => warnings.push(w) })
+    expect(warnings.length).toBe(0)
+    expect(loaded.output).toBe('md')
+  })
 })

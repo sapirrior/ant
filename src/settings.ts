@@ -146,9 +146,7 @@ export function getSettingsLockPath(): string {
 export { withFileLock } from './utils/fileLock.ts'
 
 export const KNOWN_TOP_KEYS = new Set([
-  ...Object.keys(DEFAULT_SETTINGS),
-  'model',
-  'reasoning',
+  ...Object.keys(settingsSchema.shape),
   'effort',
 ])
 
