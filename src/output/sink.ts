@@ -216,6 +216,7 @@ export class StreamJsonSink implements OutputSink {
 export class TextSink implements OutputSink {
   private isTTY: boolean
   private atLineStart = true
+  private hasContentSinceBoundary = false
 
   constructor(isTTY: boolean) {
     this.isTTY = isTTY
@@ -225,14 +226,20 @@ export class TextSink implements OutputSink {
     if (this.isTTY && event.type === 'text-delta') {
       process.stdout.write(event.delta)
       this.atLineStart = event.delta.endsWith('\n')
+      this.hasContentSinceBoundary = true
     }
   }
 
   ensureLineStart(): void {
+    if (!this.hasContentSinceBoundary) return
+
     if (!this.atLineStart) {
+      process.stdout.write('\n\n')
+    } else {
       process.stdout.write('\n')
-      this.atLineStart = true
     }
+    this.atLineStart = true
+    this.hasContentSinceBoundary = false
   }
 
   finish(outcome: ModelOutcome): void {
@@ -243,6 +250,7 @@ export class TextSink implements OutputSink {
     } else {
       if (!this.atLineStart) {
         process.stdout.write('\n')
+        this.atLineStart = true
       }
     }
   }
@@ -252,6 +260,7 @@ export class MarkdownSink implements OutputSink {
   private isTTY: boolean
   private renderer: StreamingMarkdownRenderer
   private atLineStart = true
+  private hasContentSinceBoundary = false
 
   constructor(isTTY: boolean, colorLevel?: ColorLevel, theme?: ThemeMode) {
     this.isTTY = isTTY
@@ -259,10 +268,22 @@ export class MarkdownSink implements OutputSink {
   }
 
   ensureLineStart(): void {
-    if (!this.atLineStart) {
-      process.stdout.write('\n')
-      this.atLineStart = true
+    const flushed = this.renderer.flush()
+    if (flushed) {
+      process.stdout.write(flushed)
+      this.atLineStart = flushed.endsWith('\n')
+      this.hasContentSinceBoundary = true
     }
+
+    if (!this.hasContentSinceBoundary) return
+
+    if (!this.atLineStart) {
+      process.stdout.write('\n\n')
+    } else {
+      process.stdout.write('\n')
+    }
+    this.atLineStart = true
+    this.hasContentSinceBoundary = false
   }
 
   onEvent(event: RunEvent): void {
@@ -271,6 +292,7 @@ export class MarkdownSink implements OutputSink {
       if (rendered) {
         process.stdout.write(rendered)
         this.atLineStart = rendered.endsWith('\n')
+        this.hasContentSinceBoundary = true
       }
     }
   }
@@ -288,6 +310,7 @@ export class MarkdownSink implements OutputSink {
       }
       if (!this.atLineStart) {
         process.stdout.write('\n')
+        this.atLineStart = true
       }
     }
   }

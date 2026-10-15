@@ -2,7 +2,7 @@ import type { ModelMessage } from 'ai'
 import type { Database } from 'bun:sqlite'
 import { realpathSync } from 'node:fs'
 import { runAgent } from './agent.ts'
-import { StderrLogger } from '../output/log.ts'
+import { StderrLogger, formatToolTarget, formatToolOutcome } from '../output/log.ts'
 import { detectColorLevel } from '../output/color.ts'
 import { setNoticeTheme } from '../output/notice.ts'
 import type { Config, ExitCode, RunEvent, UsageSummary } from './types.ts'
@@ -26,7 +26,7 @@ export class Engine {
   async run(config: Config): Promise<ExitCode> {
     const isStderrTTY = Boolean(process.stderr.isTTY)
     const stderrColorLevel = detectColorLevel(process.env, isStderrTTY)
-    const logger = new StderrLogger(config.logLevel, stderrColorLevel, config.theme)
+    const logger = new StderrLogger(config.logLevel, stderrColorLevel, config.theme, config.cwd)
     if (config.theme) setNoticeTheme(config.theme)
     const lifecycle = createLifecycle()
     const startTime = Date.now()
@@ -34,12 +34,18 @@ export class Engine {
     const mcpManager = new (await import('../mcp/manager.ts')).McpClientManager({ cwd: config.cwd })
     const createdCheckpoints: number[] = []
 
+    let activeSink: ReturnType<typeof createOutputSink> | undefined
+    const logStderr = (fn: () => void) => {
+      activeSink?.ensureLineStart?.()
+      fn()
+    }
+
     // Clamp timeout to 32-bit positive integer
     const clampedTimeoutMs = config.timeoutMs > 0 ? Math.min(config.timeoutMs, 2_147_483_647) : 0
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined
     if (clampedTimeoutMs > 0) {
       timeoutTimer = setTimeout(() => {
-        logger.error(`Execution timed out after ${clampedTimeoutMs}ms`)
+        logStderr(() => logger.error(`Execution timed out after ${clampedTimeoutMs}ms`))
         lifecycle.requestAbort('timeout', 4)
       }, clampedTimeoutMs)
       timeoutTimer.unref()
@@ -219,6 +225,7 @@ export class Engine {
         colorLevel: stdoutColorLevel,
         theme: config.theme,
       })
+      activeSink = sink
 
       if (sink instanceof StreamJsonSink) {
         sink.emitInit({
@@ -257,36 +264,27 @@ export class Engine {
 
           switch (event.type) {
             case 'tool-call': {
-              sink.ensureLineStart?.()
-              let summary: string | undefined
-              if (typeof event.input === 'object' && event.input !== null) {
-                const obj = event.input as Record<string, unknown>
-                if (event.toolName === 'McpTool') {
-                  if (obj.action === 'list_servers') summary = 'list_servers'
-                  else if (obj.action === 'list_tools') summary = `list_tools (${obj.server})`
-                  else if (obj.action === 'call') summary = `call ${obj.server}/${obj.tool}`
-                } else if (typeof obj.path === 'string') summary = obj.path
-                else if (typeof obj.command === 'string') summary = `"${obj.command.slice(0, 50)}"`
-                else if (typeof obj.query === 'string') summary = `"${obj.query.slice(0, 50)}"`
-                else if (typeof obj.url === 'string') summary = obj.url.slice(0, 50)
-                else if (typeof obj.pattern === 'string') summary = `/${obj.pattern}/`
-                else if (typeof obj.action === 'string') summary = `${obj.action} ${obj.taskId ?? ''}`.trim()
-                else if (typeof obj.question === 'string') summary = `"${obj.question.slice(0, 50)}"`
-              }
-              logger.toolStart(event.toolName, summary)
+              logStderr(() => {
+                const target = formatToolTarget(event.toolName, event.input, config.cwd)
+                logger.toolStart(event.toolName, target, event.callId)
+              })
               break
             }
             case 'tool-result': {
-              sink.ensureLineStart?.()
-              const summary = event.isError
-                ? (typeof event.output === 'string' ? event.output.split('\n')[0]?.slice(0, 120) : 'failed')
-                : 'done'
-              logger.toolEnd(summary || 'done', event.durationMs, Boolean(event.isError))
+              logStderr(() => {
+                const { summary, severity } = formatToolOutcome(
+                  event.toolName,
+                  event.output,
+                  event.isError
+                )
+                logger.toolEnd(summary, event.durationMs, Boolean(event.isError), event.callId, severity)
+              })
               break
             }
             case 'step-finish': {
-              sink.ensureLineStart?.()
-              logger.debug(`step ${event.stepNumber} finished (${event.finishReason})`)
+              logStderr(() => {
+                logger.debug(`step ${event.stepNumber} finished (${event.finishReason})`)
+              })
               break
             }
           }
@@ -326,21 +324,22 @@ export class Engine {
         startTime,
       })
 
-      sink.ensureLineStart?.()
-      logger.footer({
-        status: outcome.status,
-        steps: outcome.stepsExecuted,
-        totalTokens: outcome.usage?.totalTokens,
-        durationMs: Date.now() - startTime,
-        threadId: thread.id,
-        hasCheckpoints: createdCheckpoints.length > 0,
-        error: outcome.error,
+      logStderr(() => {
+        logger.footer({
+          status: outcome.status,
+          steps: outcome.stepsExecuted,
+          totalTokens: outcome.usage?.totalTokens,
+          durationMs: Date.now() - startTime,
+          threadId: thread.id,
+          hasCheckpoints: createdCheckpoints.length > 0,
+          error: outcome.error,
+        })
       })
 
       return outcome.exitCode
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      logger.error(message)
+      logStderr(() => logger.error(message))
       return 2
     } finally {
       clearInterval(heartbeatTimer)
