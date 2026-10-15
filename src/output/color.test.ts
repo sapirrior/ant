@@ -62,4 +62,44 @@ describe('output/color terminal UX formatting and theme levels', () => {
     expect(detectUnicodeSupported({ TERM: 'linux' })).toBe(false)
     expect(detectUnicodeSupported({ LANG: 'en_US.UTF-8' })).toBe(true)
   })
+
+  it('includes structural symbols with unicode and ascii fallbacks', () => {
+    const unicodeSyms = getSymbols(true)
+    expect(unicodeSyms.rail).toBe('│')
+    expect(unicodeSyms.rule).toBe('─')
+    expect(unicodeSyms.bullet).toBe('•')
+    expect(unicodeSyms.ellipsis).toBe('…')
+
+    const asciiSyms = getSymbols(false)
+    expect(asciiSyms.rail).toBe('|')
+    expect(asciiSyms.rule).toBe('-')
+    expect(asciiSyms.bullet).toBe('-')
+    expect(asciiSyms.ellipsis).toBe('...')
+  })
+
+  it('uses targeted SGR closes and restores parent styling when nested', () => {
+    const fmt = createColorFormatter(1, 'ansi')
+
+    // Bold closes with 22m, italic with 23m
+    expect(fmt.bold('hello')).toBe('\x1b[1mhello\x1b[22m')
+    expect(fmt.italic('hello')).toBe('\x1b[3mhello\x1b[23m')
+    expect(fmt.dim('hello')).toBe('\x1b[2mhello\x1b[22m')
+    expect(fmt.underline('hello')).toBe('\x1b[4mhello\x1b[24m')
+
+    // Foreground closes with 39m
+    expect(fmt.primary('hello')).toBe('\x1b[33mhello\x1b[39m')
+
+    // Italic around bold: nested bold closing with 22m leaves italic active
+    const italicBold = fmt.italic(`a ${fmt.bold('b')} c`)
+    expect(italicBold).toBe('\x1b[3ma \x1b[1mb\x1b[22m c\x1b[23m')
+
+    // Bold around foreground: foreground closing with 39m does not clear bold
+    const boldPrimary = fmt.bold(`a ${fmt.primary('b')} c`)
+    expect(boldPrimary).toBe('\x1b[1ma \x1b[33mb\x1b[39m c\x1b[22m')
+
+    // Foreground around another foreground: outer foreground is restored after inner closes
+    const nestedFg = fmt.primary(`a ${fmt.error('b')} c`)
+    // primary is 33m, error is 31m. When 31m closes with 39m, outer 33m is restored: \x1b[39m\x1b[33m
+    expect(nestedFg).toBe('\x1b[33ma \x1b[31mb\x1b[39m\x1b[33m c\x1b[39m')
+  })
 })

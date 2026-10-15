@@ -120,25 +120,36 @@ export function createColorFormatter(
   const isAnsiTheme = themeMode === 'ansi'
   const theme = resolveTheme(themeMode)
 
-  function colorize(role: keyof ThemeColors, text: string): string {
-    if (level === 0 || !text) return text
-
+  function getOpenSeq(role: keyof ThemeColors): string {
+    if (level === 0) return ''
     if (level === 1 || isAnsiTheme) {
-      const code = ANSI_16_MAP[role]
-      return `\x1b[${code}m${text}\x1b[0m`
+      return `\x1b[${ANSI_16_MAP[role]}m`
     }
-
     const rgb = theme[role]
-    if (!rgb) {
-      return text
-    }
-
+    if (!rgb) return ''
     if (level === 2) {
       const code256 = rgbToAnsi256(rgb[0], rgb[1], rgb[2])
-      return `\x1b[38;5;${code256}m${text}\x1b[0m`
+      return `\x1b[38;5;${code256}m`
     }
+    return `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m`
+  }
 
-    return `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m${text}\x1b[0m`
+  function wrapStyle(text: string, openSeq: string, closeSeq: string): string {
+    if (level === 0 || !text) return text
+    // If the inner text contains the closing sequence, re-open after close
+    const restored = text.replaceAll(closeSeq, `${closeSeq}${openSeq}`)
+    return `${openSeq}${restored}${closeSeq}`
+  }
+
+  function colorize(role: keyof ThemeColors, text: string): string {
+    if (level === 0 || !text) return text
+    const openSeq = getOpenSeq(role)
+    if (!openSeq) return text
+    // When a nested foreground closes with \x1b[39m (or \x1b[0m), restore this role's opening sequence after that close
+    const restored = text
+      .replaceAll('\x1b[39m', `\x1b[39m${openSeq}`)
+      .replaceAll('\x1b[0m', `\x1b[0m${openSeq}`)
+    return `${openSeq}${restored}\x1b[39m`
   }
 
   return {
@@ -153,10 +164,10 @@ export function createColorFormatter(
     muted: (text: string) => colorize('muted', text),
     border: (text: string) => colorize('border', text),
     text: (t: string) => t,
-    bold: (text: string) => (level > 0 ? `\x1b[1m${text}\x1b[0m` : text),
-    dim: (text: string) => (level > 0 ? `\x1b[2m${text}\x1b[0m` : text),
-    italic: (text: string) => (level > 0 ? `\x1b[3m${text}\x1b[0m` : text),
-    underline: (text: string) => (level > 0 ? `\x1b[4m${text}\x1b[0m` : text),
+    bold: (text: string) => wrapStyle(text, '\x1b[1m', '\x1b[22m'),
+    dim: (text: string) => wrapStyle(text, '\x1b[2m', '\x1b[22m'),
+    italic: (text: string) => wrapStyle(text, '\x1b[3m', '\x1b[23m'),
+    underline: (text: string) => wrapStyle(text, '\x1b[4m', '\x1b[24m'),
   }
 }
 
@@ -174,6 +185,10 @@ export interface TerminalSymbols {
   fail: string
   prompt: string
   bgTask: string
+  rail: string
+  rule: string
+  bullet: string
+  ellipsis: string
 }
 
 export function getSymbols(unicode: boolean = detectUnicodeSupported()): TerminalSymbols {
@@ -186,6 +201,10 @@ export function getSymbols(unicode: boolean = detectUnicodeSupported()): Termina
       fail: '✗',
       prompt: '?',
       bgTask: '↗',
+      rail: '│',
+      rule: '─',
+      bullet: '•',
+      ellipsis: '…',
     }
   }
   return {
@@ -196,6 +215,10 @@ export function getSymbols(unicode: boolean = detectUnicodeSupported()): Termina
     fail: 'x',
     prompt: '?',
     bgTask: '>',
+    rail: '|',
+    rule: '-',
+    bullet: '-',
+    ellipsis: '...',
   }
 }
 
