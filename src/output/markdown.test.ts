@@ -99,4 +99,50 @@ describe('markdown renderer', () => {
     // Verify no triple blank lines
     expect(result).not.toContain('\n\n\n')
   })
+
+  it('protects inline code containing asterisks and underscores from emphasis parsing', () => {
+    const renderer = new StreamingMarkdownRenderer({ colorLevel: 0 })
+    const output = renderer.append('Run `ls *.ts` or `SELECT * FROM test_table` here.\n')
+    // Asterisks inside code spans must remain literal and not be converted to <i> or stripped
+    expect(output).toContain('ls *.ts')
+    expect(output).toContain('SELECT * FROM test_table')
+    expect(output).not.toContain('\x1b')
+  })
+
+  it('streams tables chunk-by-chunk and renders with columns aligned upon completion', () => {
+    const renderer = new StreamingMarkdownRenderer({ colorLevel: 0 })
+    let output = ''
+    output += renderer.append('| Name | Age |\n')
+    // Header alone is buffered waiting for separator
+    expect(output).toBe('')
+
+    output += renderer.append('|---|---|\n')
+    expect(output).toBe('')
+
+    output += renderer.append('| Alice | 30 |\n')
+    expect(output).toBe('')
+
+    output += renderer.append('Next paragraph after table.\n')
+    // Next paragraph triggers flush of the table
+    expect(output).toContain('| Name')
+    expect(output).toContain('| Alice')
+    expect(output).toContain('Next paragraph after table.')
+  })
+
+  it('renders streaming code blocks with subtle rail on colorLevel > 0 and plain on colorLevel 0', () => {
+    const rendererColor = new StreamingMarkdownRenderer({ colorLevel: 1 })
+    let outputColor = ''
+    outputColor += rendererColor.append('```ts\n')
+    outputColor += rendererColor.append('const a = 10;\n')
+    outputColor += rendererColor.append('```\n')
+    expect(outputColor).toMatch(/│|\|/)
+
+    const rendererPlain = new StreamingMarkdownRenderer({ colorLevel: 0 })
+    let outputPlain = ''
+    outputPlain += rendererPlain.append('```ts\n')
+    outputPlain += rendererPlain.append('const a = 10;\n')
+    outputPlain += rendererPlain.append('```\n')
+    expect(outputPlain).not.toMatch(/│|\|/)
+    expect(outputPlain).toContain('const a = 10;')
+  })
 })

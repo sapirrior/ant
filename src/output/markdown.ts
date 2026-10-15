@@ -1,6 +1,6 @@
 import { marked, type Token, type Tokens } from 'marked'
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight'
-import { createColorFormatter, type ColorLevel, type ThemeMode } from './color.ts'
+import { createColorFormatter, getSymbols, type ColorLevel, type ThemeMode } from './color.ts'
 import { visibleWidth } from '../utils/format.ts'
 
 export interface MarkdownOptions {
@@ -224,7 +224,7 @@ export function getTerminalColumns(): number {
   return Math.max(20, Math.min(termCols - 2, 120))
 }
 
-export function wrapParagraph(text: string, maxWidth: number): string {
+export function wrapParagraph(text: string, maxWidth: number, continuationIndent?: string): string {
   if (maxWidth <= 0 || text.length === 0) return text
 
   // Preserve pre-existing newlines within text blocks
@@ -239,18 +239,19 @@ export function wrapParagraph(text: string, maxWidth: number): string {
 
     // Preserve leading indentation if present
     const indentMatch = rawLine.match(/^(\s+)/)
-    const indent = indentMatch ? indentMatch[1]! : ''
-    const content = indentMatch ? rawLine.slice(indent.length) : rawLine
+    const initialIndent = indentMatch ? indentMatch[1]! : ''
+    const nextIndent = continuationIndent !== undefined ? continuationIndent : initialIndent
+    const content = indentMatch ? rawLine.slice(initialIndent.length) : rawLine
 
     const words = content.split(/ +/)
-    let currentLine = indent
-    let currentLineWidth = stringWidth(indent)
+    let currentLine = initialIndent
+    let currentLineWidth = stringWidth(initialIndent)
 
     for (const word of words) {
       if (!word) continue
       const wordWidth = stringWidth(word)
 
-      if (currentLine === indent) {
+      if (currentLine === initialIndent) {
         currentLine += word
         currentLineWidth += wordWidth
       } else if (currentLineWidth + 1 + wordWidth <= maxWidth) {
@@ -258,8 +259,8 @@ export function wrapParagraph(text: string, maxWidth: number): string {
         currentLineWidth += 1 + wordWidth
       } else {
         wrappedLines.push(currentLine)
-        currentLine = indent + word
-        currentLineWidth = stringWidth(indent) + wordWidth
+        currentLine = nextIndent + word
+        currentLineWidth = stringWidth(nextIndent) + wordWidth
       }
     }
 
@@ -421,12 +422,12 @@ function formatToken(
       }
 
       const columnWidths = tableToken.header.map((header: Tokens.Table['header'][number], index: number) => {
-        let maxWidth = stringWidth(getDisplayText(header.tokens))
+        let maxColWidth = visibleWidth(getDisplayText(header.tokens))
         for (const row of tableToken.rows) {
-          const cellLength = stringWidth(getDisplayText(row[index]?.tokens))
-          maxWidth = Math.max(maxWidth, cellLength)
+          const cellLength = visibleWidth(getDisplayText(row[index]?.tokens))
+          maxColWidth = Math.max(maxColWidth, cellLength)
         }
-        return Math.max(maxWidth, 3)
+        return Math.max(maxColWidth, 3)
       })
 
       let tableOutput = '| '
@@ -434,7 +435,7 @@ function formatToken(
         const content =
           header.tokens?.map((t: Token) => formatToken(t, fmt, 0, null, null)).join('') ?? ''
         const width = columnWidths[index]!
-        const padding = ' '.repeat(Math.max(0, width - stringWidth(content)))
+        const padding = ' '.repeat(Math.max(0, width - visibleWidth(content)))
         tableOutput += `${content}${padding} | `
       })
       tableOutput = tableOutput.trimEnd() + EOL
@@ -451,7 +452,7 @@ function formatToken(
           const content =
             cell.tokens?.map((t: Token) => formatToken(t, fmt, 0, null, null)).join('') ?? ''
           const width = columnWidths[index]!
-          const padding = ' '.repeat(Math.max(0, width - stringWidth(content)))
+          const padding = ' '.repeat(Math.max(0, width - visibleWidth(content)))
           tableOutput += `${content}${padding} | `
         })
         tableOutput = tableOutput.trimEnd() + EOL
@@ -478,7 +479,7 @@ function formatToken(
 
 export function renderMarkdown(content: string, options: MarkdownOptions = {}): string {
   configureMarked()
-  const fmt = createColorFormatter(options.colorLevel)
+  const fmt = createColorFormatter(options.colorLevel, options.theme)
   const columns = options.columns ?? getTerminalColumns()
   const tokens = marked.lexer(content)
   return tokens
@@ -495,12 +496,15 @@ export class StreamingMarkdownRenderer {
   private buffer = ''
   private insideCodeBlock = false
   private codeLang = ''
+  private pendingTable: string[] = []
   private readonly fmt: ReturnType<typeof createColorFormatter>
+  private readonly sym: ReturnType<typeof getSymbols>
   private readonly highlightTheme: Theme
   private readonly columns: number
 
   constructor(options: MarkdownOptions = {}) {
     this.fmt = createColorFormatter(options.colorLevel, options.theme)
+    this.sym = getSymbols()
     this.highlightTheme = createHighlightTheme(this.fmt)
     this.columns = options.columns ?? getTerminalColumns()
   }
@@ -516,9 +520,9 @@ export class StreamingMarkdownRenderer {
       const line = this.buffer.slice(0, newlineIdx)
       this.buffer = this.buffer.slice(newlineIdx + 1)
 
-      const rendered = this.renderLine(line)
-      if (rendered !== null) {
-        output += rendered + '\n'
+      const rendered = this.processLine(line)
+      if (rendered) {
+        output += rendered
       }
     }
 
@@ -526,36 +530,127 @@ export class StreamingMarkdownRenderer {
   }
 
   flush(): string {
-    if (this.buffer.length === 0) return ''
-    const remaining = this.buffer
-    this.buffer = ''
-    const rendered = this.renderLine(remaining)
-    return rendered !== null ? rendered : ''
+    let output = ''
+    if (this.pendingTable.length > 0) {
+      output += this.flushTable()
+    }
+    if (this.buffer.length > 0) {
+      const remaining = this.buffer
+      this.buffer = ''
+      const rendered = this.processLine(remaining)
+      if (rendered) {
+        output += rendered
+      }
+    }
+    return output
   }
 
-  private renderLine(line: string): string | null {
+  private processLine(line: string): string {
     const trimmed = line.trim()
 
     // 1. Code fence check
     if (trimmed.startsWith('```')) {
+      let flushedTable = ''
+      if (this.pendingTable.length > 0) {
+        flushedTable = this.flushTable()
+      }
       if (!this.insideCodeBlock) {
         this.insideCodeBlock = true
         this.codeLang = trimmed.slice(3).trim()
-        return null
+        return flushedTable
       } else {
         this.insideCodeBlock = false
         this.codeLang = ''
-        return null
+        return flushedTable
       }
     }
 
-    // Inside code block
+    // Inside code block - do not interpret as tables
     if (this.insideCodeBlock) {
-      if (this.fmt.level > 0 && line.length > 0) {
-        return highlightCode(line, this.codeLang, this.fmt, this.highlightTheme)
+      let rendered: string
+      if (this.fmt.level > 0) {
+        const highlighted = line.length > 0
+          ? highlightCode(line, this.codeLang, this.fmt, this.highlightTheme)
+          : line
+        rendered = `${this.fmt.muted(this.sym.rail)} ${highlighted}`
+      } else {
+        rendered = line
       }
-      return line
+      return rendered + '\n'
     }
+
+    // 2. Table row detection and buffering
+    const isTableRow = trimmed.startsWith('|') && trimmed.endsWith('|')
+    const isTableSeparator = /^\|(?:\s*:?-+:?\s*\|)+\s*$/.test(trimmed)
+
+    if (this.pendingTable.length > 0) {
+      if (this.pendingTable.length === 1) {
+        // We have a candidate header
+        if (isTableSeparator) {
+          // Confirmed table! Buffer the separator
+          this.pendingTable.push(line)
+          return ''
+        } else {
+          // Not a table, flush previous candidate header as ordinary text
+          const header = this.pendingTable[0]!
+          this.pendingTable = []
+          let flushed = this.renderOrdinaryLine(header) + '\n'
+          if (isTableRow) {
+            this.pendingTable.push(line)
+          } else {
+            const current = this.renderOrdinaryLine(line)
+            if (current !== null) flushed += current + '\n'
+          }
+          return flushed
+        }
+      } else {
+        // Table is active (header + separator already buffered)
+        if (isTableRow) {
+          this.pendingTable.push(line)
+          return ''
+        } else {
+          // End of table, flush the table and process current line
+          const flushed = this.flushTable()
+          const current = this.renderOrdinaryLine(line)
+          return flushed + (current !== null ? current + '\n' : '')
+        }
+      }
+    } else if (isTableRow) {
+      // Possible candidate header
+      this.pendingTable.push(line)
+      return ''
+    }
+
+    // Normal ordinary line
+    const rendered = this.renderOrdinaryLine(line)
+    return rendered !== null ? rendered + '\n' : ''
+  }
+
+  private flushTable(): string {
+    if (this.pendingTable.length === 0) return ''
+    const rows = this.pendingTable
+    this.pendingTable = []
+
+    if (rows.length < 2) {
+      // Incomplete candidate table: fallback to ordinary lines
+      return rows.map((r) => this.renderOrdinaryLine(r) + '\n').join('')
+    }
+
+    const rawTable = rows.join('\n')
+    configureMarked()
+    const tokens = marked.lexer(rawTable)
+    const tableToken = tokens.find((t: Token) => t.type === 'table')
+
+    if (tableToken) {
+      return formatToken(tableToken, this.fmt, 0, null, null, this.columns)
+    }
+
+    // Tokenization did not yield a table, fallback to ordinary lines
+    return rows.map((r) => this.renderOrdinaryLine(r) + '\n').join('')
+  }
+
+  private renderOrdinaryLine(line: string): string | null {
+    const trimmed = line.trim()
 
     // 2. Headings
     if (/^#{1,6}\s+/.test(trimmed)) {
@@ -563,46 +658,96 @@ export class StreamingMarkdownRenderer {
       return this.fmt.bold(this.renderInline(headingText))
     }
 
-    // 3. Blockquotes
+    // 3. Blockquotes: hanging indent with rail on continuation lines
     if (trimmed.startsWith('>')) {
       const quoteText = trimmed.replace(/^>\s*/, '')
-      return `${this.fmt.muted('│')} ${this.fmt.italic(this.renderInline(quoteText))}`
+      const rendered = this.renderInline(quoteText)
+      const rail = this.fmt.muted(this.sym.rail)
+      const quotePrefix = `${rail} `
+      if (this.columns > 0 && visibleWidth(rendered) + visibleWidth(quotePrefix) > this.columns) {
+        return wrapParagraph(`${quotePrefix}${this.fmt.italic(rendered)}`, this.columns, quotePrefix)
+      }
+      return `${quotePrefix}${this.fmt.italic(rendered)}`
     }
 
     // 4. Horizontal rules
     if (/^(\*\*\*|---|___)$/.test(trimmed)) {
-      return this.fmt.muted('───')
+      return this.fmt.muted(this.sym.rule.repeat(3))
     }
 
-    // 5. Unordered lists
+    // 5. Unordered lists: hanging indent under text
     if (/^[-*+]\s+/.test(trimmed)) {
       const itemText = trimmed.replace(/^[-*+]\s+/, '')
-      return `  - ${this.renderInline(itemText)}`
+      const rendered = this.renderInline(itemText)
+      const bullet = this.sym.bullet === '-' ? '-' : this.sym.bullet
+      const firstPrefix = `  ${bullet} `
+      const continuationPrefix = '    '
+      if (this.columns > 0 && visibleWidth(rendered) + visibleWidth(firstPrefix) > this.columns) {
+        return wrapParagraph(`${firstPrefix}${rendered}`, this.columns, continuationPrefix)
+      }
+      return `${firstPrefix}${rendered}`
     }
 
-    // 6. Ordered lists
+    // 6. Ordered lists: hanging indent aligned under text
     if (/^\d+\.\s+/.test(trimmed)) {
       const match = trimmed.match(/^(\d+\.)\s+(.*)/)
       if (match) {
-        return `  ${match[1]} ${this.renderInline(match[2]!)}`
+        const numPart = match[1]!
+        const rendered = this.renderInline(match[2]!)
+        const firstPrefix = `  ${numPart} `
+        const continuationPrefix = ' '.repeat(firstPrefix.length)
+        if (this.columns > 0 && visibleWidth(rendered) + visibleWidth(firstPrefix) > this.columns) {
+          return wrapParagraph(`${firstPrefix}${rendered}`, this.columns, continuationPrefix)
+        }
+        return `${firstPrefix}${rendered}`
       }
     }
 
     // Standard text paragraph line - smart wrap based on terminal columns
     const rendered = this.renderInline(line)
-    if (this.columns > 0 && stringWidth(rendered) > this.columns) {
+    if (this.columns > 0 && visibleWidth(rendered) > this.columns) {
       return wrapParagraph(rendered, this.columns)
     }
     return rendered
   }
 
   private renderInline(text: string): string {
-    // Codespan `code`
-    let res = text.replace(/`([^`]+)`/g, (_, code) => this.fmt.secondary(code))
-    // Bold **text**
+    const codePlaceholders: string[] = []
+    const linkPlaceholders: string[] = []
+
+    // 1. Protect inline code spans `code`
+    // Use delimiters without '_' or '*' so emphasis parsers cannot match across them
+    let res = text.replace(/`([^`]+)`/g, (_, code) => {
+      const idx = codePlaceholders.length
+      codePlaceholders.push(this.fmt.secondary(code))
+      return `\x1aCODE${idx}\x1f`
+    })
+
+    // 2. Protect links [label](url)
+    res = res.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+      const idx = linkPlaceholders.length
+      linkPlaceholders.push(`${this.fmt.accent(label)} (${this.fmt.muted(url)})`)
+      return `\x1aLINK${idx}\x1f`
+    })
+
+    // 3. Bold **text** and __text__
     res = res.replace(/\*\*([^*]+)\*\*/g, (_, bold) => this.fmt.bold(bold))
-    // Italic *text*
+    res = res.replace(/__([^_]+)__/g, (_, bold) => this.fmt.bold(bold))
+
+    // 4. Italic *text* and _text_
     res = res.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, em) => this.fmt.italic(em))
+    res = res.replace(/(?<!_)_([^_]+)_(?!_)/g, (_, em) => this.fmt.italic(em))
+
+    // 5. Restore links
+    res = res.replace(/\x1aLINK(\d+)\x1f/g, (_, idx) => {
+      return linkPlaceholders[Number(idx)] ?? ''
+    })
+
+    // 6. Restore code spans
+    res = res.replace(/\x1aCODE(\d+)\x1f/g, (_, idx) => {
+      return codePlaceholders[Number(idx)] ?? ''
+    })
+
     return res
   }
 }
