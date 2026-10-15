@@ -198,6 +198,7 @@ export async function runAgent(
     backgroundEnabled: true,
     foregroundMs: bashSettings?.foregroundMs,
     passEnv: bashSettings?.passEnv,
+    theme: config.theme,
     onCheckpoint,
   }
 

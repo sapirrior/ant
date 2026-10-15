@@ -93,6 +93,7 @@ export function createMcpTool(context: ToolExecutionContext) {
                     message: `MCP tool wants to run: ${input.server}/${input.tool}`,
                     command: promptArgs,
                     reason: verdict.reason,
+                    theme: context.theme,
                     signal: context.abortSignal,
                   }))
 

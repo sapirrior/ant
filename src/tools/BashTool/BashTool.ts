@@ -102,6 +102,7 @@ export function createBashTool(context: ToolExecutionContext) {
               message: 'Bash wants to run',
               command: input.command,
               reason: verdict.reason,
+              theme: context.theme,
               signal: context.abortSignal,
             }))
 

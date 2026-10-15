@@ -8,7 +8,7 @@ import {
   restoreCheckpoint,
   type CheckpointRecord,
 } from '../store/checkpoints.ts'
-import { formatTimeAgo } from '../utils/format.ts'
+import { formatTimeAgo, padEndVisible } from '../utils/format.ts'
 import { parseIntStrict } from '../utils/number.ts'
 import { notice } from '../output/notice.ts'
 
@@ -29,13 +29,13 @@ function renderCheckpointsList(threadId: string, threadTitle: string, checkpoint
   out += '  #  WHEN     TOOL        FILES\n'
 
   for (const cp of checkpoints) {
-    const when = formatTimeAgo(cp.createdAt).padEnd(8)
-    const tool = cp.tool.padEnd(11)
+    const when = padEndVisible(formatTimeAgo(cp.createdAt), 8)
+    const tool = padEndVisible(cp.tool, 11)
     const filesSummary = cp.files
       .map((f) => `${f.status ?? '~'} ${f.path}`)
       .join(', ')
 
-    out += `  ${String(cp.seq).padEnd(2)} ${when} ${tool} ${filesSummary}\n`
+    out += `  ${padEndVisible(String(cp.seq), 2)} ${when} ${tool} ${filesSummary}\n`
   }
   return out
 }

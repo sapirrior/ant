@@ -14,6 +14,22 @@ const collectMcp = (v: string, prev: string[]) => [
   ...v.split(',').map((s) => s.trim()).filter(Boolean),
 ]
 
+export function resolveOutputFormat(
+  flagOutput?: string,
+  envOutput?: string,
+  settingsOutput?: string,
+  isStdoutTTY: boolean = Boolean(process.stdout.isTTY)
+): OutputFormat {
+  const chosen = flagOutput ?? envOutput ?? settingsOutput
+  if (chosen) {
+    if (chosen !== 'text' && chosen !== 'md' && chosen !== 'json' && chosen !== 'stream-json') {
+      throw new Error(`Invalid output format: "${chosen}". Allowed: text, md, json, stream-json`)
+    }
+    return chosen as OutputFormat
+  }
+  return isStdoutTTY ? 'md' : 'text'
+}
+
 export function registerRunCommand(program: Command): void {
   program
     .argument('[prompt]', 'Instruction prompt for the agent')
@@ -87,11 +103,13 @@ export function registerRunCommand(program: Command): void {
           retries = userSettings.retries
         }
 
-        // 6. Resolve output: CLI > env > settings > text
-        const outputFormat = (options.output ?? env.ANT_OUTPUT ?? userSettings.output ?? 'text') as OutputFormat
-        if (outputFormat !== 'text' && outputFormat !== 'md' && outputFormat !== 'json' && outputFormat !== 'stream-json') {
-          throw new Error(`Invalid output format: "${outputFormat}". Allowed: text, md, json, stream-json`)
-        }
+        // 6. Resolve output: CLI > env > settings > context-sensitive default (md on TTY, else text)
+        const outputFormat = resolveOutputFormat(
+          options.output,
+          env.ANT_OUTPUT,
+          userSettings.output,
+          Boolean(process.stdout.isTTY)
+        )
 
         // 7. Resolve logLevel: CLI > env > settings > info
         const logLevel = (options.logLevel ?? env.ANT_LOG_LEVEL ?? userSettings.logLevel ?? 'info') as LogLevel

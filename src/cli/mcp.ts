@@ -10,6 +10,7 @@ import {
 import type { McpScope, McpServerConfig } from '../mcp/types.ts'
 import { createColorFormatter } from '../output/color.ts'
 import { notice } from '../output/notice.ts'
+import { padEndVisible } from '../utils/format.ts'
 
 export function registerMcpCommand(program: Command): void {
   const mcpCmd = program
@@ -57,12 +58,12 @@ export function registerMcpCommand(program: Command): void {
       )
 
       for (const s of servers) {
-        const nameStr = s.name.padEnd(16)
-        const transportStr = s.config.transport.padEnd(12)
-        const scopeStr = (s.scope === 'project' ? fmt.accent(s.scope) : fmt.secondary(s.scope)).padEnd(
-          s.scope === 'project' ? 10 + 9 : 10 + 9
-        )
-        const statusStr = s.enabled ? fmt.success('enabled').padEnd(12 + 9) : fmt.muted('disabled').padEnd(12 + 9)
+        const nameStr = padEndVisible(s.name, 16)
+        const transportStr = padEndVisible(s.config.transport, 12)
+        const scopeColored = s.scope === 'project' ? fmt.accent(s.scope) : fmt.secondary(s.scope)
+        const scopeStr = padEndVisible(scopeColored, 10)
+        const statusColored = s.enabled ? fmt.success('enabled') : fmt.muted('disabled')
+        const statusStr = padEndVisible(statusColored, 12)
 
         let target = ''
         if (s.config.transport === 'stdio') {

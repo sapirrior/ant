@@ -1,13 +1,15 @@
 import { openSync, closeSync } from 'node:fs'
 import fs from 'node:fs'
 import readline from 'node:readline'
-import { createColorFormatter, type ColorLevel } from './color.ts'
+import { createColorFormatter, getSymbols, type ColorLevel, type ThemeMode } from './color.ts'
+import { collapseInline } from '../utils/format.ts'
 
 export interface ConfirmPromptOptions {
   message: string
   command?: string
   reason?: string
   colorLevel?: ColorLevel
+  theme?: ThemeMode
   signal?: AbortSignal
 }
 
@@ -29,16 +31,27 @@ export async function promptConfirmTTY(options: ConfirmPromptOptions): Promise<b
     return false // No terminal available
   }
 
-  const fmt = createColorFormatter(options.colorLevel)
+  const fmt = createColorFormatter(options.colorLevel, options.theme)
+  const sym = getSymbols()
   const reasonStr = options.reason ? ` ${fmt.muted(`(${options.reason})`)}` : ''
-  let promptText = `${fmt.warning('?')} ${options.message}${reasonStr}\n`
+  let promptText = `${fmt.warning(sym.prompt)} ${options.message}${reasonStr}\n`
 
   if (options.command) {
     const lines = options.command.split('\n')
-    const preview = lines.slice(0, 20).join('\n')
-    promptText += `  $ ${fmt.text(preview)}\n`
+    const displayLines = lines.slice(0, 20)
+    const rail = fmt.muted(sym.rail)
+
+    displayLines.forEach((l, idx) => {
+      const sanitized = collapseInline(l, 100)
+      if (idx === 0) {
+        promptText += `  ${rail} $ ${fmt.text(sanitized)}\n`
+      } else {
+        promptText += `  ${rail}   ${fmt.text(sanitized)}\n`
+      }
+    })
+
     if (lines.length > 20) {
-      promptText += `  ${fmt.muted(`... (${lines.length - 20} more lines)`)}\n`
+      promptText += `  ${rail} ${fmt.muted(`... (${lines.length - 20} more lines)`)}\n`
     }
   }
 

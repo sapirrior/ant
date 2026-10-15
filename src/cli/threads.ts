@@ -9,7 +9,7 @@ import {
   type ThreadRecord,
 } from '../store/threads.ts'
 import { createInterface } from 'node:readline/promises'
-import { formatTimeAgo, formatTokens } from '../utils/format.ts'
+import { formatTimeAgo, formatTokens, padEndVisible, padStartVisible, visibleWidth } from '../utils/format.ts'
 import { parseIntStrict } from '../utils/number.ts'
 import { pidAlive } from '../utils/process.ts'
 import { displayPath } from '../output/paths.ts'
@@ -34,29 +34,29 @@ function renderTable(threads: readonly ThreadRecord[], showCwd: boolean): string
   })
 
   // Calculate column widths
-  let wId = 'ID'.length
-  let wUp = 'UPDATED'.length
-  let wTu = 'TURNS'.length
-  let wMs = 'MSGS'.length
-  let wCk = 'CKPTS'.length
-  let wTk = 'TOKENS (in/out)'.length
-  let wCwd = 'CWD'.length
+  let wId = visibleWidth('ID')
+  let wUp = visibleWidth('UPDATED')
+  let wTu = visibleWidth('TURNS')
+  let wMs = visibleWidth('MSGS')
+  let wCk = visibleWidth('CKPTS')
+  let wTk = visibleWidth('TOKENS (in/out)')
+  let wCwd = visibleWidth('CWD')
 
   for (const r of rows) {
-    if (r.idDisplay.length > wId) wId = r.idDisplay.length
-    if (r.updated.length > wUp) wUp = r.updated.length
-    if (r.turns.length > wTu) wTu = r.turns.length
-    if (r.msgs.length > wMs) wMs = r.msgs.length
-    if (r.ckpts.length > wCk) wCk = r.ckpts.length
-    if (r.tokens.length > wTk) wTk = r.tokens.length
-    if (r.cwd.length > wCwd) wCwd = r.cwd.length
+    if (visibleWidth(r.idDisplay) > wId) wId = visibleWidth(r.idDisplay)
+    if (visibleWidth(r.updated) > wUp) wUp = visibleWidth(r.updated)
+    if (visibleWidth(r.turns) > wTu) wTu = visibleWidth(r.turns)
+    if (visibleWidth(r.msgs) > wMs) wMs = visibleWidth(r.msgs)
+    if (visibleWidth(r.ckpts) > wCk) wCk = visibleWidth(r.ckpts)
+    if (visibleWidth(r.tokens) > wTk) wTk = visibleWidth(r.tokens)
+    if (visibleWidth(r.cwd) > wCwd) wCwd = visibleWidth(r.cwd)
   }
 
-  const colHeader = showCwd ? `${'CWD'.padEnd(wCwd)}  ` : ''
-  let out = `${'ID'.padEnd(wId)}  ${'UPDATED'.padEnd(wUp)}  ${'TURNS'.padStart(wTu)}  ${'MSGS'.padStart(wMs)}  ${'CKPTS'.padStart(wCk)}  ${'TOKENS (in/out)'.padEnd(wTk)}  ${colHeader}TITLE\n`
+  const colHeader = showCwd ? `${padEndVisible('CWD', wCwd)}  ` : ''
+  let out = `${padEndVisible('ID', wId)}  ${padEndVisible('UPDATED', wUp)}  ${padStartVisible('TURNS', wTu)}  ${padStartVisible('MSGS', wMs)}  ${padStartVisible('CKPTS', wCk)}  ${padEndVisible('TOKENS (in/out)', wTk)}  ${colHeader}TITLE\n`
   for (const r of rows) {
-    const colVal = showCwd ? `${r.cwd.padEnd(wCwd)}  ` : ''
-    out += `${r.idDisplay.padEnd(wId)}  ${r.updated.padEnd(wUp)}  ${r.turns.padStart(wTu)}  ${r.msgs.padStart(wMs)}  ${r.ckpts.padStart(wCk)}  ${r.tokens.padEnd(wTk)}  ${colVal}${r.title}\n`
+    const colVal = showCwd ? `${padEndVisible(r.cwd, wCwd)}  ` : ''
+    out += `${padEndVisible(r.idDisplay, wId)}  ${padEndVisible(r.updated, wUp)}  ${padStartVisible(r.turns, wTu)}  ${padStartVisible(r.msgs, wMs)}  ${padStartVisible(r.ckpts, wCk)}  ${padEndVisible(r.tokens, wTk)}  ${colVal}${r.title}\n`
   }
   return out
 }

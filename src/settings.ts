@@ -73,7 +73,6 @@ export const DEFAULT_SETTINGS: Settings = {
   timeout: '30m',
   retries: 4,
   streamRetries: 1,
-  output: 'text',
   logLevel: 'info',
   theme: 'auto',
   allow: {

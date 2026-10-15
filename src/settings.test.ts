@@ -149,4 +149,11 @@ describe('settings module', () => {
     writeFileSync(settingsPath, JSON.stringify({ allow: { bash: 'false' } }), 'utf-8')
     expect(() => loadSettings()).toThrow(/allow\.bash/)
   })
+
+  it('keeps output unset by default when settings file exists', () => {
+    const settingsPath = join(testHome, 'settings.json')
+    writeFileSync(settingsPath, JSON.stringify({ maxSteps: 15 }), 'utf-8')
+    const loaded = loadSettings()
+    expect(loaded.output).toBeUndefined()
+  })
 })

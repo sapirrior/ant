@@ -141,6 +141,7 @@ export interface ToolExecutionContext {
   readonly backgroundEnabled?: boolean
   readonly foregroundMs?: number
   readonly passEnv?: string[]
+  readonly theme?: Theme
   readonly ui?: {
     readonly confirm?: (opts: import('../output/tty.ts').ConfirmPromptOptions) => boolean | Promise<boolean>
   }
