@@ -15,8 +15,14 @@
     "model"
   ],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
-    "type": { "type": "string", "const": "result" },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "result"
+    },
     "subtype": {
       "type": "string",
       "enum": [
@@ -31,8 +37,15 @@
       ],
       "example": "max_turns"
     },
-    "is_error": { "type": "boolean", "const": true },
-    "exit_code": { "type": "integer", "minimum": 1, "example": 1 },
+    "is_error": {
+      "type": "boolean",
+      "const": true
+    },
+    "exit_code": {
+      "type": "integer",
+      "minimum": 1,
+      "example": 1
+    },
     "result": {
       "type": ["string", "null"],
       "example": "Partial output generated before reaching turn limit"
@@ -41,32 +54,66 @@
       "type": "object",
       "required": ["code", "message"],
       "properties": {
-        "code": { "type": "string", "example": "max_turns_exceeded" },
-        "message": { "type": "string", "example": "Agent reached maximum turns limit (5)" }
+        "code": {
+          "type": "string",
+          "example": "max_turns"
+        },
+        "message": {
+          "type": "string",
+          "example": "Agent reached maximum turns limit (5)"
+        }
       }
     },
-    "session_id": { "type": ["string", "null"], "example": "0194eb47-a123-7bcd-8ef0-123456789abc" },
-    "num_turns": { "type": "integer", "minimum": 0, "example": 5 },
-    "duration_ms": { "type": "integer", "minimum": 0, "example": 4510 },
-    "model": { "type": "string", "example": "anthropic/claude-3-7-sonnet-20250219" },
-    "effort": { "type": ["string", "null"] },
+    "session_id": {
+      "type": ["string", "null"],
+      "example": "0194eb47-a123-7bcd-8ef0-123456789abc"
+    },
+    "num_turns": {
+      "type": "integer",
+      "minimum": 0,
+      "example": 5
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "example": 4510
+    },
+    "model": {
+      "type": "string",
+      "example": "anthropic/claude-3-7-sonnet-20250219"
+    },
+    "effort": {
+      "type": ["string", "null"]
+    },
     "usage": {
-      "type": "object",
+      "type": ["object", "null"],
       "properties": {
-        "input_tokens": { "type": "integer" },
-        "output_tokens": { "type": "integer" },
-        "total_tokens": { "type": "integer" },
-        "cached_tokens": { "type": "integer" }
+        "input_tokens": {
+          "type": "integer"
+        },
+        "output_tokens": {
+          "type": "integer"
+        },
+        "total_tokens": {
+          "type": "integer"
+        },
+        "cached_tokens": {
+          "type": "integer"
+        }
       }
     },
     "checkpoints": {
       "type": "array",
-      "items": { "type": "integer" },
+      "items": {
+        "type": "integer"
+      },
       "example": []
     },
     "warnings": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "example": []
     }
   }

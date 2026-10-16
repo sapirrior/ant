@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import pkg from '../../package.json' with { type: 'json' }
+import { ERROR_SUBTYPES, SCHEMA_VERSION } from '../constants/index.ts'
 
-export const SCHEMA_VERSION = 1
+export { SCHEMA_VERSION }
 
 export const UsageSchema = z.object({
   input_tokens: z.number().int().nonnegative().optional(),
@@ -15,14 +16,9 @@ export const ErrorDetailSchema = z.object({
   message: z.string(),
 })
 
-export const ResultSchema = z.object({
+export const BaseResultFields = {
   schema_version: z.number().int().default(SCHEMA_VERSION),
   type: z.literal('result').default('result'),
-  subtype: z.string(),
-  is_error: z.boolean(),
-  exit_code: z.number().int(),
-  result: z.string().nullable().optional(),
-  error: ErrorDetailSchema.nullable().optional(),
   session_id: z.string().nullable().optional(),
   num_turns: z.number().int().nonnegative().default(0),
   duration_ms: z.number().int().nonnegative().default(0),
@@ -31,8 +27,33 @@ export const ResultSchema = z.object({
   usage: UsageSchema.nullable().optional(),
   checkpoints: z.array(z.number().int()).default([]),
   warnings: z.array(z.string()).default([]),
+}
+
+export const SuccessResultSchema = z.object({
+  ...BaseResultFields,
+  subtype: z.literal('success').default('success'),
+  is_error: z.literal(false).default(false),
+  exit_code: z.literal(0).default(0),
+  result: z.string().nullable().optional(),
+  error: z.null().optional().default(null),
 })
 
+export const ErrorResultSchema = z.object({
+  ...BaseResultFields,
+  subtype: z.enum(ERROR_SUBTYPES),
+  is_error: z.literal(true).default(true),
+  exit_code: z.number().int().min(1),
+  result: z.string().nullable().optional(),
+  error: ErrorDetailSchema,
+})
+
+export const ResultSchema = z.discriminatedUnion('is_error', [
+  SuccessResultSchema,
+  ErrorResultSchema,
+])
+
+export type SuccessResultEnvelope = z.infer<typeof SuccessResultSchema>
+export type ErrorResultEnvelope = z.infer<typeof ErrorResultSchema>
 export type ResultEnvelope = z.infer<typeof ResultSchema>
 
 // Stream events (NDJSON)
@@ -81,18 +102,29 @@ export const StreamWarningEventSchema = StreamBaseEventSchema.extend({
   message: z.string(),
 })
 
-export const StreamResultEventSchema = ResultSchema.extend({
+export const StreamSuccessResultEventSchema = SuccessResultSchema.extend({
   seq: z.number().int().nonnegative(),
   ts: z.string(),
 })
 
-export const StreamEventSchema = z.discriminatedUnion('type', [
+export const StreamErrorResultEventSchema = ErrorResultSchema.extend({
+  seq: z.number().int().nonnegative(),
+  ts: z.string(),
+})
+
+export const StreamResultEventSchema = z.discriminatedUnion('is_error', [
+  StreamSuccessResultEventSchema,
+  StreamErrorResultEventSchema,
+])
+
+export const StreamEventSchema = z.union([
   StreamInitEventSchema,
   StreamTextDeltaEventSchema,
   StreamToolCallEventSchema,
   StreamToolResultEventSchema,
   StreamWarningEventSchema,
-  StreamResultEventSchema,
+  StreamSuccessResultEventSchema,
+  StreamErrorResultEventSchema,
 ])
 
 export type StreamEvent = z.infer<typeof StreamEventSchema>

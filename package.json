@@ -16,6 +16,8 @@
     "dev": "bun --no-env-file --watch run src/main.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "schemas:generate": "bun scripts/schema.ts",
+    "schemas:check": "bun scripts/schema.ts --check",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "bundle": "bun build --target=bun src/main.ts --outfile=dist/ant.js && chmod +x dist/ant.js",

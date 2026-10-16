@@ -1,74 +1,280 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AntStreamJsonEvents",
-  "description": "Array of example NDJSON events streamed sequentially on stdout during `stream-json` execution.",
-  "type": "array",
-  "items": {
-    "type": "object",
-    "required": ["schema_version", "type", "seq", "ts"],
-    "properties": {
-      "schema_version": { "type": "integer", "const": 1 },
-      "seq": { "type": "integer", "minimum": 0 },
-      "ts": { "type": "string", "format": "date-time" },
-      "type": {
-        "type": "string",
-        "enum": ["init", "text-delta", "tool-call", "tool-result", "warning", "result"]
+  "title": "AntStreamJsonEvent",
+  "description": "Single NDJSON event emitted line-by-line on stdout during `stream-json` execution.",
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "StreamInitEvent",
+      "type": "object",
+      "required": ["schema_version", "seq", "ts", "type", "model", "permission_mode", "tools"],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "const": "init"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permission_mode": {
+          "type": "string",
+          "enum": ["default", "plan", "acceptEdits", "bypassPermissions"]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "session_id": {
+          "type": ["string", "null"]
+        },
+        "ant_version": {
+          "type": "string"
+        }
       }
-    }
-  },
-  "examples": [
-    {
-      "schema_version": 1,
-      "seq": 0,
-      "ts": "2026-10-16T06:50:00.000Z",
-      "type": "init",
-      "model": "google/gemini-2.5-flash",
-      "permission_mode": "default",
-      "tools": ["ReadFile", "ListDir", "Grep", "WebSearch", "WebFetch"],
-      "session_id": "0194eb47-a123-7bcd-8ef0-123456789abc",
-      "ant_version": "1.0.0"
     },
     {
-      "schema_version": 1,
-      "seq": 1,
-      "ts": "2026-10-16T06:50:00.320Z",
-      "type": "tool-call",
-      "call_id": "call_123",
-      "tool": "ReadFile",
-      "input": { "path": "package.json" }
+      "title": "StreamTextDeltaEvent",
+      "type": "object",
+      "required": ["schema_version", "seq", "ts", "type", "delta"],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "const": "text-delta"
+        },
+        "delta": {
+          "type": "string"
+        }
+      }
     },
     {
-      "schema_version": 1,
-      "seq": 2,
-      "ts": "2026-10-16T06:50:00.350Z",
-      "type": "tool-result",
-      "call_id": "call_123",
-      "tool": "ReadFile",
-      "output": { "content": "{\n  \"name\": \"ant\"\n}" },
-      "duration_ms": 30,
-      "is_error": false,
-      "truncated": false
+      "title": "StreamToolCallEvent",
+      "type": "object",
+      "required": ["schema_version", "seq", "ts", "type", "call_id", "tool", "input"],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "const": "tool-call"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "input": {},
+        "truncated": {
+          "type": "boolean"
+        },
+        "original_size": {
+          "type": "integer"
+        }
+      }
     },
     {
-      "schema_version": 1,
-      "seq": 3,
-      "ts": "2026-10-16T06:50:00.600Z",
-      "type": "text-delta",
-      "delta": "This package is named ant."
+      "title": "StreamToolResultEvent",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "seq",
+        "ts",
+        "type",
+        "call_id",
+        "tool",
+        "output",
+        "duration_ms",
+        "is_error"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "const": "tool-result"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "output": {},
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "original_size": {
+          "type": "integer"
+        }
+      }
     },
     {
-      "schema_version": 1,
-      "seq": 4,
-      "ts": "2026-10-16T06:50:01.000Z",
-      "type": "result",
-      "subtype": "success",
-      "is_error": false,
-      "exit_code": 0,
-      "result": "This package is named ant.",
-      "session_id": "0194eb47-a123-7bcd-8ef0-123456789abc",
-      "num_turns": 1,
-      "duration_ms": 1000,
-      "model": "google/gemini-2.5-flash"
+      "title": "StreamWarningEvent",
+      "type": "object",
+      "required": ["schema_version", "seq", "ts", "type", "message"],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "const": "warning"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "title": "StreamResultEvent",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "seq",
+        "ts",
+        "type",
+        "subtype",
+        "is_error",
+        "exit_code",
+        "num_turns",
+        "duration_ms",
+        "model"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "const": "result"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "result": {
+          "type": ["string", "null"]
+        },
+        "error": {
+          "type": ["object", "null"],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "session_id": {
+          "type": ["string", "null"]
+        },
+        "num_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": ["string", "null"]
+        },
+        "usage": {
+          "type": ["object", "null"]
+        },
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   ]
 }

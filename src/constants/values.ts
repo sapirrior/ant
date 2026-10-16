@@ -49,3 +49,17 @@ export const RUN_STATUSES = [
   'cancelled',
 ] as const
 export type Status = (typeof RUN_STATUSES)[number]
+
+export const ERROR_SUBTYPES = [
+  'max_turns',
+  'truncated',
+  'empty_response',
+  'usage_error',
+  'model_error',
+  'timeout',
+  'internal_error',
+  'cancelled',
+] as const
+export type ErrorSubtype = (typeof ERROR_SUBTYPES)[number]
+
+export const SCHEMA_VERSION = 1

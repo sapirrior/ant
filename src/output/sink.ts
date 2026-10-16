@@ -2,6 +2,7 @@ import type { ModelOutcome, OutputFormat, RunEvent } from '../core/types.ts'
 import type { ColorLevel, ThemeMode } from './color.ts'
 import pkg from '../../package.json' with { type: 'json' }
 import { StreamingMarkdownRenderer } from './markdown.ts'
+import { SCHEMA_VERSION } from '../constants/index.ts'
 import { ResultSchema, StreamResultEventSchema, type ResultEnvelope } from './schema.ts'
 
 export interface OutputSinkOptions {
@@ -64,11 +65,11 @@ export function buildResultEnvelope(
   const subtype = outcome.status === 'completed' ? 'success' : outcome.status
 
   const raw = {
-    schema_version: 1,
+    schema_version: SCHEMA_VERSION,
     type: 'result' as const,
     subtype,
     is_error: isError,
-    exit_code: outcome.exitCode,
+    exit_code: isError ? (outcome.exitCode >= 1 ? outcome.exitCode : 1) : 0,
     result: outcome.text || null,
     error: isError
       ? {
@@ -93,28 +94,7 @@ export function buildResultEnvelope(
     warnings: [],
   }
 
-  const parsed = ResultSchema.safeParse(raw)
-  if (parsed.success) {
-    return parsed.data
-  }
-
-  return {
-    schema_version: 1,
-    type: 'result' as const,
-    subtype,
-    is_error: isError,
-    exit_code: outcome.exitCode,
-    result: outcome.text || null,
-    error: isError ? { code: outcome.status, message: outcome.error ?? '' } : null,
-    session_id: meta?.threadId && meta.threadId !== 'ephemeral' ? meta.threadId : null,
-    num_turns: outcome.stepsExecuted ?? 0,
-    duration_ms: durationMs,
-    model: meta?.model ?? '',
-    effort: meta?.effort ?? null,
-    usage: null,
-    checkpoints: meta?.checkpoints ?? [],
-    warnings: [`Schema validation warning: ${parsed.error.message}`],
-  }
+  return ResultSchema.parse(raw)
 }
 
 export class JsonSink implements OutputSink {
@@ -146,7 +126,7 @@ export class StreamJsonSink implements OutputSink {
 
   private writeLine(eventData: Record<string, unknown>): void {
     const event = {
-      schema_version: 1,
+      schema_version: SCHEMA_VERSION,
       seq: this.seq++,
       ts: new Date().toISOString(),
       ...eventData,

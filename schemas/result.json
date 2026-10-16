@@ -15,37 +15,85 @@
     "model"
   ],
   "properties": {
-    "schema_version": { "type": "integer", "const": 1 },
-    "type": { "type": "string", "const": "result" },
-    "subtype": { "type": "string", "const": "success" },
-    "is_error": { "type": "boolean", "const": false },
-    "exit_code": { "type": "integer", "const": 0 },
-    "result": { "type": ["string", "null"], "example": "Explanation of the code..." },
-    "session_id": { "type": ["string", "null"], "example": "0194eb47-a123-7bcd-8ef0-123456789abc" },
-    "num_turns": { "type": "integer", "minimum": 1, "example": 2 },
-    "duration_ms": { "type": "integer", "minimum": 0, "example": 1420 },
-    "model": { "type": "string", "example": "google/gemini-2.5-flash" },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "result"
+    },
+    "subtype": {
+      "type": "string",
+      "const": "success"
+    },
+    "is_error": {
+      "type": "boolean",
+      "const": false
+    },
+    "exit_code": {
+      "type": "integer",
+      "const": 0
+    },
+    "result": {
+      "type": ["string", "null"],
+      "example": "Explanation of the code..."
+    },
+    "session_id": {
+      "type": ["string", "null"],
+      "example": "0194eb47-a123-7bcd-8ef0-123456789abc"
+    },
+    "num_turns": {
+      "type": "integer",
+      "minimum": 0,
+      "example": 2
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "example": 1420
+    },
+    "model": {
+      "type": "string",
+      "example": "google/gemini-2.5-flash"
+    },
     "effort": {
       "type": ["string", "null"],
-      "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", null]
+      "enum": ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh", "max", null]
     },
     "usage": {
-      "type": "object",
+      "type": ["object", "null"],
       "properties": {
-        "input_tokens": { "type": "integer", "example": 320 },
-        "output_tokens": { "type": "integer", "example": 85 },
-        "total_tokens": { "type": "integer", "example": 405 },
-        "cached_tokens": { "type": "integer", "example": 0 }
+        "input_tokens": {
+          "type": "integer",
+          "example": 320
+        },
+        "output_tokens": {
+          "type": "integer",
+          "example": 85
+        },
+        "total_tokens": {
+          "type": "integer",
+          "example": 405
+        },
+        "cached_tokens": {
+          "type": "integer",
+          "example": 0
+        }
       }
     },
     "checkpoints": {
       "type": "array",
-      "items": { "type": "integer" },
+      "items": {
+        "type": "integer"
+      },
       "example": [1, 2]
     },
     "warnings": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "example": []
     }
   }
