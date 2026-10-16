@@ -8,7 +8,7 @@ import {
   withFileLock,
   KEYS,
   type Settings,
-} from '../settings.ts'
+} from '../settings/index.ts'
 import { notice } from '../output/notice.ts'
 
 export function registerConfigCommand(program: Command): void {

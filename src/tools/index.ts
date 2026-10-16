@@ -1,6 +1,6 @@
 import type { ToolSet } from 'ai'
 import type { ToolExecutionContext, ToolName } from '../core/types.ts'
-import type { Settings } from '../settings.ts'
+import type { Settings } from '../settings/index.ts'
 import { createBashTool } from './BashTool/BashTool.ts'
 import { createDeleteFileTool } from './DeleteFileTool/DeleteFileTool.ts'
 import { createEditFileTool } from './EditFileTool/EditFileTool.ts'

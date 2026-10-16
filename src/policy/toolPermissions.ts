@@ -1,25 +1,10 @@
 import { isAbsolute, normalize, resolve } from 'node:path'
-import type { ToolName } from '../core/types.ts'
+import type { PermissionMode, ToolName } from '../constants/index.ts'
+import { TOOL_NAMES } from '../constants/index.ts'
 
-export type PermissionMode =
-  | 'default'
-  | 'plan'
-  | 'acceptEdits'
-  | 'bypassPermissions'
+export type { PermissionMode }
 
-export const KNOWN_TOOLS: readonly ToolName[] = [
-  'ReadFile',
-  'ListDir',
-  'Grep',
-  'WriteFile',
-  'EditFile',
-  'DeleteFile',
-  'Bash',
-  'TaskManager',
-  'WebSearch',
-  'WebFetch',
-  'McpTool',
-]
+export const KNOWN_TOOLS: readonly ToolName[] = TOOL_NAMES
 
 const READ_ONLY_TOOLS = new Set<ToolName>([
   'ReadFile',

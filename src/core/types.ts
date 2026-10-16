@@ -1,21 +1,24 @@
 import type { ModelMessage } from 'ai'
-import type { EffectivePermissions, PermissionMode, ParsedToolRule } from '../policy/toolPermissions.ts'
+import type { EffectivePermissions, ParsedToolRule } from '../policy/toolPermissions.ts'
+import type {
+  LogLevel,
+  OutputFormat,
+  PermissionMode,
+  ReasoningEffort,
+  Status,
+  Theme,
+  ToolName,
+} from '../constants/index.ts'
 
-export type OutputFormat = 'text' | 'md' | 'json' | 'stream-json'
-
-export type LogLevel = 'error' | 'info' | 'debug'
-
-export type Theme = 'auto' | 'dark' | 'light' | 'ansi'
-
-export type ReasoningEffort =
-  | 'provider-default'
-  | 'none'
-  | 'minimal'
-  | 'low'
-  | 'medium'
-  | 'high'
-  | 'xhigh'
-  | 'max'
+export type {
+  LogLevel,
+  OutputFormat,
+  PermissionMode,
+  ReasoningEffort,
+  Status,
+  Theme,
+  ToolName,
+}
 
 export interface Config {
   readonly prompt?: string
@@ -42,19 +45,8 @@ export interface Config {
   readonly disallowedToolsRules?: readonly ParsedToolRule[]
   readonly appendSystemPrompt?: string
   readonly appendSystemPromptFile?: string
-  readonly settings?: import('../settings.ts').Settings
+  readonly settings?: import('../settings/index.ts').Settings
 }
-
-export type Status =
-  | 'completed'
-  | 'max_turns'
-  | 'truncated'
-  | 'empty_response'
-  | 'usage_error'
-  | 'model_error'
-  | 'timeout'
-  | 'internal_error'
-  | 'cancelled'
 
 export type ExitCode = 0 | 1 | 2 | 3 | 4 | 5 | 129 | 130 | 141 | 143
 
@@ -109,19 +101,6 @@ export interface ModelRunOptions {
   ) => number
   readonly onEvent?: (event: RunEvent) => void
 }
-
-export type ToolName =
-  | 'ReadFile'
-  | 'ListDir'
-  | 'Grep'
-  | 'WriteFile'
-  | 'EditFile'
-  | 'DeleteFile'
-  | 'Bash'
-  | 'TaskManager'
-  | 'WebSearch'
-  | 'WebFetch'
-  | 'McpTool'
 
 export interface ToolExecutionContext {
   readonly cwd: string

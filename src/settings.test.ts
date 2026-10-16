@@ -11,7 +11,7 @@ import {
   getSettingsLockPath,
   VALID_REASONING,
   type Settings,
-} from './settings.ts'
+} from './settings/index.ts'
 
 describe('settings module', () => {
   let testHome: string

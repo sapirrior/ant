@@ -10,7 +10,7 @@ import {
 } from '../policy/toolPermissions.ts'
 import { Engine } from '../core/engine.ts'
 import { resolveLanguageModel } from '../core/model.ts'
-import { loadSettings, parseDurationMs, parseReasoning } from '../settings.ts'
+import { loadSettings, parseDurationMs, parseReasoning } from '../settings/index.ts'
 import { parseIntStrict } from '../utils/number.ts'
 import { notice } from '../output/notice.ts'
 import type { Config, LogLevel, OutputFormat, Theme, ToolName } from '../core/types.ts'
