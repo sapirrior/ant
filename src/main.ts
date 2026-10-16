@@ -14,7 +14,7 @@ export function createProgram(): Command {
   const program = new Command()
   program
     .name('ant')
-    .description('A daily-use, streaming, model-agnostic AI agent CLI')
+    .description('The post-modern autonomous print agent')
     .version(pkg.version, '-v, --version')
     .exitOverride((err) => {
       if (err.exitCode === 0) {

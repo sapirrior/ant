@@ -5,7 +5,6 @@ import { executeWithPolicy } from '../pipeline.ts'
 import { MCP_TOOL_PROMPT } from './prompt.ts'
 import { McpClientManager } from '../../mcp/manager.ts'
 import { checkMcpToolPolicy } from '../../policy/mcp.ts'
-import { hasControllingTTY, promptConfirmTTY } from '../../output/tty.ts'
 
 export const mcpInputSchema = z.object({
   action: z.enum(['list_servers', 'list_tools', 'call']).describe('The MCP action to perform'),
@@ -73,35 +72,9 @@ export function createMcpTool(context: ToolExecutionContext) {
             }
 
             if (verdict.status === 'ask') {
-              const promptArgs = JSON.stringify(input.args ?? {}, null, 2)
-              const hasTTY = hasControllingTTY()
-              if (!context.ui?.confirm && !hasTTY) {
-                throw new Error(
-                  `No terminal available for interactive confirmation. Pre-approve with --allow-mcp "${input.server}/${input.tool}".`
-                )
-              }
-
-              const confirmed = await (context.ui?.confirm
-                ? Promise.resolve(
-                    context.ui.confirm({
-                      message: `MCP tool wants to run: ${input.server}/${input.tool}`,
-                      command: promptArgs,
-                      reason: verdict.reason,
-                    })
-                  )
-                : promptConfirmTTY({
-                    message: `MCP tool wants to run: ${input.server}/${input.tool}`,
-                    command: promptArgs,
-                    reason: verdict.reason,
-                    theme: context.theme,
-                    signal: context.abortSignal,
-                  }))
-
-              if (!confirmed) {
-                throw new Error(
-                  `User denied permission to execute MCP tool "${input.server}/${input.tool}". Do not retry without user approval.`
-                )
-              }
+              throw new Error(
+                `Permission denied: MCP tool "${input.server}/${input.tool}" requires explicit approval. Pre-approve with --allowed-tools "McpTool" or --allowed-tools "McpTool(${input.server}/*)".`
+              )
             }
 
             if (signal?.aborted) {

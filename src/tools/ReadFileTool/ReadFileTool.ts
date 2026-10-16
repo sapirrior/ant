@@ -23,7 +23,7 @@ export function createReadFileTool(context: ToolExecutionContext) {
       return executeWithPolicy('ReadFile', input, context, async ({ path, offset, limit }) => {
         const fullPath = resolveWithinRoot(path, context.cwd)
 
-        if (isSensitivePath(fullPath) && !context.grants.has('fs.sensitive')) {
+        if (isSensitivePath(fullPath) && context.effectivePermissions.mode !== 'bypassPermissions') {
           throw new Error(`Access denied: reading sensitive file "${path}" requires explicit sensitive authorization.`)
         }
 

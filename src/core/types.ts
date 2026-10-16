@@ -1,4 +1,5 @@
 import type { ModelMessage } from 'ai'
+import type { EffectivePermissions, PermissionMode, ParsedToolRule } from '../policy/toolPermissions.ts'
 
 export type OutputFormat = 'text' | 'md' | 'json' | 'stream-json'
 
@@ -16,42 +17,39 @@ export type ReasoningEffort =
   | 'xhigh'
   | 'max'
 
-export type Capability =
-  | 'fs.read'
-  | 'fs.write'
-  | 'fs.sensitive'
-  | 'shell.run'
-  | 'shell.destructive'
-
-export interface Grants {
-  readonly has: (cap: Capability) => boolean
-  readonly capabilities: ReadonlySet<Capability>
-}
-
 export interface Config {
   readonly prompt?: string
   readonly stdinInput?: string
   readonly model: string
-  readonly maxSteps: number
+  readonly maxTurns: number
   readonly timeoutMs: number
   readonly retries: number
   readonly outputFormat: OutputFormat
   readonly logLevel: LogLevel
   readonly theme: Theme
   readonly effort?: ReasoningEffort
-  readonly grants: Grants
+  readonly effectivePermissions: EffectivePermissions
   readonly cwd: string
   readonly continueLatest: boolean
   readonly resumeThreadId?: string
   readonly streamRetries?: number
   readonly allowedMcp?: readonly string[]
   readonly deniedMcp?: readonly string[]
+  readonly bare?: boolean
+  readonly noSessionPersistence?: boolean
+  readonly verbose?: boolean
+  readonly toolsFilter?: readonly ToolName[]
+  readonly permissionMode?: PermissionMode
+  readonly allowedToolsRules?: readonly ParsedToolRule[]
+  readonly disallowedToolsRules?: readonly ParsedToolRule[]
+  readonly appendSystemPrompt?: string
+  readonly appendSystemPromptFile?: string
   readonly settings?: import('../settings.ts').Settings
 }
 
 export type Status =
   | 'completed'
-  | 'max_steps'
+  | 'max_turns'
   | 'truncated'
   | 'empty_response'
   | 'usage_error'
@@ -129,7 +127,7 @@ export type ToolName =
 
 export interface ToolExecutionContext {
   readonly cwd: string
-  readonly grants: Grants
+  readonly effectivePermissions: EffectivePermissions
   readonly abortSignal?: AbortSignal
   readonly readState?: Map<string, string>
   readonly threadId?: string
@@ -142,9 +140,6 @@ export interface ToolExecutionContext {
   readonly foregroundMs?: number
   readonly passEnv?: string[]
   readonly theme?: Theme
-  readonly ui?: {
-    readonly confirm?: (opts: import('../output/tty.ts').ConfirmPromptOptions) => boolean | Promise<boolean>
-  }
   readonly onCheckpoint?: (
     tool: string,
     toolCallId: string | undefined,

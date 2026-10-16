@@ -17,46 +17,33 @@ import { createMcpTool } from './McpTool/McpTool.ts'
 export function buildTools(context: ToolExecutionContext, settings?: Settings): ToolSet {
   const tools: ToolSet = {}
 
-  const isEnabled = (toolName: ToolName): boolean => {
+  const isExposed = (toolName: ToolName): boolean => {
+    if (!context.effectivePermissions.exposedTools.includes(toolName)) {
+      return false
+    }
     return settings?.tools?.[toolName]?.enabled ?? true
   }
 
-  // Read tools (requires fs.read)
-  if (context.grants.has('fs.read')) {
-    if (isEnabled('ReadFile')) tools.ReadFile = createReadFileTool(context)
-    if (isEnabled('ListDir')) tools.ListDir = createListDirTool(context)
-    if (isEnabled('Grep')) tools.Grep = createGrepTool(context)
-  }
+  // File read/search tools
+  if (isExposed('ReadFile')) tools.ReadFile = createReadFileTool(context)
+  if (isExposed('ListDir')) tools.ListDir = createListDirTool(context)
+  if (isExposed('Grep')) tools.Grep = createGrepTool(context)
 
-  // Write tools (requires fs.write)
-  if (context.grants.has('fs.write')) {
-    if (isEnabled('WriteFile')) tools.WriteFile = createWriteFileTool(context)
-    if (isEnabled('EditFile')) tools.EditFile = createEditFileTool(context)
-    if (isEnabled('DeleteFile')) tools.DeleteFile = createDeleteFileTool(context)
-  }
+  // File write/edit tools
+  if (isExposed('WriteFile')) tools.WriteFile = createWriteFileTool(context)
+  if (isExposed('EditFile')) tools.EditFile = createEditFileTool(context)
+  if (isExposed('DeleteFile')) tools.DeleteFile = createDeleteFileTool(context)
 
-  // Shell tools (requires shell.run)
-  const bashGranted = context.grants.has('shell.run') && isEnabled('Bash')
-  if (bashGranted) {
-    tools.Bash = createBashTool(context)
-    // TaskManager only exposed if Bash is also enabled and exposed
-    if (isEnabled('TaskManager') && context.tasks) {
-      tools.TaskManager = createTaskManagerTool(context)
-    }
-  }
+  // Shell tools
+  if (isExposed('Bash')) tools.Bash = createBashTool(context)
+  if (isExposed('TaskManager') && context.tasks) tools.TaskManager = createTaskManagerTool(context)
 
   // Web tools (public informational web access)
-  if (isEnabled('WebSearch')) {
-    tools.WebSearch = createWebSearchTool(context)
-  }
-  if (isEnabled('WebFetch')) {
-    tools.WebFetch = createWebFetchTool(context)
-  }
+  if (isExposed('WebSearch')) tools.WebSearch = createWebSearchTool(context)
+  if (isExposed('WebFetch')) tools.WebFetch = createWebFetchTool(context)
 
   // MCP meta-tool
-  if (isEnabled('McpTool')) {
-    tools.McpTool = createMcpTool(context)
-  }
+  if (isExposed('McpTool')) tools.McpTool = createMcpTool(context)
 
   return tools
 }

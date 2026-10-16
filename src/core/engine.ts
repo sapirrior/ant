@@ -31,7 +31,10 @@ export class Engine {
     const lifecycle = createLifecycle()
     const startTime = Date.now()
     const tasks = new TaskManagerRegistry()
-    const mcpManager = new (await import('../mcp/manager.ts')).McpClientManager({ cwd: config.cwd })
+    const mcpManager = new (await import('../mcp/manager.ts')).McpClientManager({
+      cwd: config.cwd,
+      bare: config.bare,
+    })
     const createdCheckpoints: number[] = []
 
     let activeSink: ReturnType<typeof createOutputSink> | undefined
@@ -83,7 +86,11 @@ export class Engine {
     })
 
     try {
-      db = openDb()
+      const isPersistent = !config.noSessionPersistence
+      if (isPersistent) {
+        db = openDb()
+      }
+
       let thread: ThreadRecord
       let messages: ModelMessage[] = []
       let isNewThread = true
@@ -97,28 +104,29 @@ export class Engine {
       }
 
       const loadExisting = (threadIdOrLatest: string) => {
-        const t = getThread(db!, threadIdOrLatest, realCwd)
+        if (!db) throw new Error('Cannot resume thread when persistence is disabled')
+        const t = getThread(db, threadIdOrLatest, realCwd)
         if (t.cwd !== realCwd) {
           throw new Error(`thread belongs to ${t.cwd}; cd there first`)
         }
         activeThreadId = t.id
-        acquireLease(db!, t.id)
+        acquireLease(db, t.id)
         if (t.model !== config.model) {
           modelMismatchOld = t.model
-          db!.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
+          db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
             config.model,
             Date.now(),
             t.id,
           ])
           t.model = config.model
         }
-        const storedMessages = getMessages(db!, t.id)
+        const storedMessages = getMessages(db, t.id)
         const repaired = repairHistory(storedMessages)
         if (repaired.repaired.length > 0) {
           logger.info(`Session history repaired: ${repaired.repaired.join(', ')}`)
           const tail = repaired.messages.slice(storedMessages.length)
           if (tail.length > 0) {
-            appendMessages(db!, t.id, tail)
+            appendMessages(db, t.id, tail)
           }
         }
         return { t, msgs: repaired.messages }
@@ -144,7 +152,7 @@ export class Engine {
             role: 'user',
             content: userContent,
           }
-          appendMessage(db, thread.id, userMessage)
+          if (db) appendMessage(db, thread.id, userMessage)
           messages.push(userMessage)
         } else {
           // If continuing/resuming without an additional prompt, ensure conversation ends in a user turn
@@ -154,7 +162,7 @@ export class Engine {
               role: 'user',
               content: 'Continue where you left off.',
             }
-            appendMessage(db, thread.id, continueMessage)
+            if (db) appendMessage(db, thread.id, continueMessage)
             messages.push(continueMessage)
           }
         }
@@ -164,40 +172,43 @@ export class Engine {
           throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
         }
 
-        thread = createThread(db, {
-          prompt: config.prompt,
-          stdinInput: config.stdinInput,
-          cwd: realCwd,
-          model: config.model,
-        })
-        activeThreadId = thread.id
-        acquireLease(db, thread.id)
+        if (isPersistent && db) {
+          thread = createThread(db, {
+            prompt: config.prompt,
+            stdinInput: config.stdinInput,
+            cwd: realCwd,
+            model: config.model,
+          })
+          activeThreadId = thread.id
+          acquireLease(db, thread.id)
+        } else {
+          thread = {
+            id: 'ephemeral',
+            title: config.prompt ? config.prompt.slice(0, 50) : 'Ephemeral session',
+            cwd: realCwd,
+            model: config.model,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            turns: 0,
+            messages: 0,
+            steps: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            lockPid: null,
+            lockAt: null,
+          }
+        }
 
         const userMessage: ModelMessage = {
           role: 'user',
           content: userContent,
         }
-        appendMessage(db, thread.id, userMessage)
+        if (db) appendMessage(db, thread.id, userMessage)
         messages.push(userMessage)
       }
 
-      const allowedCaps: string[] = []
-      if (config.grants.has('fs.read')) allowedCaps.push('read')
-      if (config.grants.has('fs.write')) allowedCaps.push('edit')
-      if (config.grants.has('shell.run')) allowedCaps.push('bash')
-      if (config.grants.has('shell.destructive')) allowedCaps.push('destructiveBash')
-
-      const activeToolsList: string[] = []
-      if (config.grants.has('fs.read')) {
-        activeToolsList.push('ReadFile', 'ListDir', 'Grep')
-      }
-      if (config.grants.has('fs.write')) {
-        activeToolsList.push('WriteFile', 'EditFile', 'DeleteFile')
-      }
-      if (config.grants.has('shell.run')) {
-        activeToolsList.push('Bash', 'TaskManager')
-      }
-      activeToolsList.push('WebSearch', 'WebFetch')
+      const activeToolsList = [...config.effectivePermissions.exposedTools]
+      const permissionMode = config.effectivePermissions.mode
 
       logger.header({
         model: config.model,
@@ -206,7 +217,7 @@ export class Engine {
         title: thread.title,
         isNew: isNewThread,
         messageCount: messages.length,
-        allowedCaps,
+        allowedCaps: [permissionMode],
         modelMismatchOld,
         toolsList: activeToolsList,
       })
@@ -234,7 +245,7 @@ export class Engine {
           provider: config.model.split('/')[0],
           cwd: config.cwd,
           effort: config.effort ?? null,
-          grants: allowedCaps,
+          permissionMode,
           tools: activeToolsList,
           resumed: !isNewThread,
           modelChangedFrom: modelMismatchOld ?? null,
@@ -250,14 +261,18 @@ export class Engine {
           tasks,
           mcpManager,
           onStepPersist: (stepMessages: ModelMessage[], usage?: UsageSummary, stepsIncrement = 1) => {
-            // Atomic step message and usage persistence
-            recordStepMessages(db!, thread.id, stepMessages, stepsIncrement, usage)
+            if (db) {
+              recordStepMessages(db, thread.id, stepMessages, stepsIncrement, usage)
+            }
           },
         },
         onCheckpoint: (tool, toolCallId, files) => {
-          const seq = recordCheckpoint(db!, thread.id, tool, toolCallId, files)
-          createdCheckpoints.push(seq)
-          return seq
+          if (db) {
+            const seq = recordCheckpoint(db, thread.id, tool, toolCallId, files)
+            createdCheckpoints.push(seq)
+            return seq
+          }
+          return 0
         },
         onEvent: (event: RunEvent) => {
           sink.onEvent(event)
@@ -292,7 +307,7 @@ export class Engine {
       })
 
       // If run ended without an assistant message, append synthetic one for provider alternation
-      if (outcome.status !== 'completed' && !outcome.text) {
+      if (db && outcome.status !== 'completed' && !outcome.text) {
         const stored = getMessages(db, thread.id)
         if (stored.length > 0 && stored[stored.length - 1]!.role === 'user') {
           const syntheticMsg: ModelMessage = {
@@ -304,15 +319,17 @@ export class Engine {
       }
 
       // Record last_status and last_exit_code in threads table
-      try {
-        db.run('UPDATE threads SET last_status = ?, last_exit_code = ?, updated_at = ? WHERE id = ?', [
-          outcome.status,
-          outcome.exitCode,
-          Date.now(),
-          thread.id,
-        ])
-      } catch {
-        // Suppress failure here so it doesn't mask exit code
+      if (db) {
+        try {
+          db.run('UPDATE threads SET last_status = ?, last_exit_code = ?, updated_at = ? WHERE id = ?', [
+            outcome.status,
+            outcome.exitCode,
+            Date.now(),
+            thread.id,
+          ])
+        } catch {
+          // Suppress failure here so it doesn't mask exit code
+        }
       }
 
       // Finalize sink

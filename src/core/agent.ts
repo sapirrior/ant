@@ -58,7 +58,7 @@ export function mapStatusToExitCode(status: Status): ExitCode {
   switch (status) {
     case 'completed':
       return 0
-    case 'max_steps':
+    case 'max_turns':
     case 'truncated':
     case 'empty_response':
       return 1
@@ -187,7 +187,7 @@ export async function runAgent(
 
   const toolContext: ToolExecutionContext = {
     cwd: config.cwd,
-    grants: config.grants,
+    effectivePermissions: config.effectivePermissions,
     abortSignal: signal,
     readState,
     threadId,
@@ -224,19 +224,13 @@ export async function runAgent(
       tools,
       providerOptions,
       reasoning: config.effort,
-      stopWhen: isStepCount(config.maxSteps),
+      stopWhen: isStepCount(config.maxTurns),
       abortSignal: signal,
       maxRetries: config.retries,
       streamRetries: config.streamRetries ?? config.settings?.streamRetries ?? 1,
       timeout: {
         firstChunkMs: 180000,
         chunkMs: 60000,
-      },
-      prepareStep: ({ stepNumber }) => {
-        if (config.maxSteps > 1 && stepNumber === config.maxSteps - 1) {
-          return { toolChoice: 'none' }
-        }
-        return undefined
       },
       onStepEnd: (step) => {
         stepsExecuted++
@@ -358,8 +352,8 @@ export async function runAgent(
     }
 
     let status: Status = 'completed'
-    if (stepsExecuted >= config.maxSteps && finalFinishReason === 'tool-calls') {
-      status = 'max_steps'
+    if (stepsExecuted >= config.maxTurns && finalFinishReason !== 'stop') {
+      status = 'max_turns'
     } else if (finalFinishReason === 'length') {
       status = 'truncated'
     } else if (finalText.trim().length === 0) {

@@ -5,6 +5,7 @@ import type { McpToolInfo, ResolvedMcpServer } from './types.ts'
 
 export interface McpManagerOptions {
   readonly cwd?: string
+  readonly bare?: boolean
 }
 
 export interface McpToolCallResult {
@@ -42,12 +43,14 @@ function buildCleanSubprocessEnv(
 
 export class McpClientManager {
   private readonly cwd: string
+  private readonly bare: boolean
   private readonly activeClients = new Map<string, MCPClient>()
   private readonly clientPromises = new Map<string, Promise<MCPClient>>()
   private cachedServers: Map<string, ResolvedMcpServer> | null = null
 
   constructor(options: McpManagerOptions = {}) {
     this.cwd = options.cwd ?? process.cwd()
+    this.bare = Boolean(options.bare)
   }
 
   /**
@@ -55,7 +58,7 @@ export class McpClientManager {
    */
   getServers(): Map<string, ResolvedMcpServer> {
     if (!this.cachedServers) {
-      this.cachedServers = resolveMergedMcpServers(this.cwd)
+      this.cachedServers = resolveMergedMcpServers(this.cwd, { ignoreProjectScope: this.bare })
     }
     return this.cachedServers
   }

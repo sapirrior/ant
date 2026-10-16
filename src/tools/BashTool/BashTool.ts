@@ -5,7 +5,6 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { classifyBashCommand } from '../../policy/bash.ts'
-import { promptConfirmTTY, hasControllingTTY } from '../../output/tty.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { BASH_DESCRIPTION } from './prompt.ts'
 
@@ -67,11 +66,24 @@ export function createBashTool(context: ToolExecutionContext) {
     inputSchema: bashInputSchema,
     execute: async (input) => {
       // 1. Classification & policy check BEFORE entering execution queue/timer
+      // 1. Check effective permissions
+      if (context.effectivePermissions) {
+        const check = context.effectivePermissions.check('Bash', input.command)
+        if (!check.allowed) {
+          return {
+            ok: false,
+            output: null,
+            error: JSON.stringify({
+              error: `Permission denied: Bash requires --allowed-tools "Bash" or matching pattern like --allowed-tools "Bash(${input.command.split(' ')[0]} *)". Reason: ${check.reason ?? 'not approved'}`,
+            }),
+          }
+        }
+      }
+
       const verdict = classifyBashCommand(input.command, context.cwd)
+      const isBypass = context.effectivePermissions.mode === 'bypassPermissions'
 
-      const hasDestructiveGrant = context.grants.has('shell.destructive')
-
-      if (verdict.status === 'blocked' && !hasDestructiveGrant) {
+      if (verdict.status === 'blocked' && !isBypass) {
         return {
           ok: false,
           output: null,
@@ -79,40 +91,13 @@ export function createBashTool(context: ToolExecutionContext) {
         }
       }
 
-      if (verdict.status === 'ask' && !hasDestructiveGrant) {
-        const hasTTY = hasControllingTTY()
-        if (!context.ui?.confirm && !hasTTY) {
-          return {
-            ok: false,
-            output: null,
-            error:
-              'No terminal available for interactive confirmation. Re-run with --allow-bash or --allow-destructive-bash.',
-          }
-        }
-
-        const confirmed = await (context.ui?.confirm
-          ? Promise.resolve(
-              context.ui.confirm({
-                message: 'Bash wants to run',
-                command: input.command,
-                reason: verdict.reason,
-              })
-            )
-          : promptConfirmTTY({
-              message: 'Bash wants to run',
-              command: input.command,
-              reason: verdict.reason,
-              theme: context.theme,
-              signal: context.abortSignal,
-            }))
-
-        if (!confirmed) {
-          return {
-            ok: false,
-            output: null,
-            error:
-              'User denied permission to run this command. Do not retry the same command; ask the user or choose another approach.',
-          }
+      if (verdict.status === 'ask' && !isBypass) {
+        return {
+          ok: false,
+          output: null,
+          error: JSON.stringify({
+            error: `Permission denied: Potentially destructive command blocked by safety classifier: ${verdict.reason}. Re-run with --dangerously-skip-permissions to allow.`,
+          }),
         }
       }
 

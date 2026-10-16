@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { ToolExecutionQueue, executeWithPolicy } from './pipeline.ts'
 import { buildTools } from './index.ts'
+import { resolveEffectivePermissions } from '../policy/toolPermissions.ts'
 import type { ToolExecutionContext } from '../core/types.ts'
 
 describe('ToolExecutionQueue', () => {
@@ -56,10 +57,11 @@ describe('ToolExecutionQueue', () => {
 
     const context: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: {
-        has: () => true,
-        capabilities: new Set(['fs.read']),
-      },
+      effectivePermissions: resolveEffectivePermissions({
+        mode: 'default',
+        allowedRules: [],
+        disallowedRules: [],
+      }),
       abortSignal: controller.signal,
     }
 
@@ -74,19 +76,20 @@ describe('ToolExecutionQueue', () => {
     expect(result.error).toMatch(/aborted by user signal/)
   })
 
-  it('exposes only tools granted by capability', () => {
-    const readOnlyCtx: ToolExecutionContext = {
+  it('exposes only tools permitted by effectivePermissions', () => {
+    const planCtx: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: {
-        has: (c) => c === 'fs.read',
-        capabilities: new Set(['fs.read']),
-      },
+      effectivePermissions: resolveEffectivePermissions({
+        mode: 'plan',
+        allowedRules: [],
+        disallowedRules: [],
+      }),
     }
-    const readTools = Object.keys(buildTools(readOnlyCtx))
-    expect(readTools).toContain('ReadFile')
-    expect(readTools).toContain('ListDir')
-    expect(readTools).toContain('Grep')
-    expect(readTools).not.toContain('WriteFile')
-    expect(readTools).not.toContain('Bash')
+    const exposedTools = Object.keys(buildTools(planCtx))
+    expect(exposedTools).toContain('ReadFile')
+    expect(exposedTools).toContain('ListDir')
+    expect(exposedTools).toContain('Grep')
+    expect(exposedTools).not.toContain('WriteFile')
+    expect(exposedTools).not.toContain('Bash')
   })
 })

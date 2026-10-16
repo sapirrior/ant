@@ -1,15 +1,21 @@
-import { realpathSync } from 'node:fs'
+import { realpathSync, readFileSync, existsSync } from 'node:fs'
 import { Command } from 'commander'
 import { readPipedStdin } from '../core/input.ts'
-import { resolveGrants } from '../policy/grants.ts'
+import {
+  parseToolRule,
+  resolveEffectivePermissions,
+  type PermissionMode,
+  type ParsedToolRule,
+  KNOWN_TOOLS,
+} from '../policy/toolPermissions.ts'
 import { Engine } from '../core/engine.ts'
 import { resolveLanguageModel } from '../core/model.ts'
 import { loadSettings, parseDurationMs, parseReasoning } from '../settings.ts'
 import { parseIntStrict } from '../utils/number.ts'
 import { notice } from '../output/notice.ts'
-import type { Config, LogLevel, OutputFormat, Theme } from '../core/types.ts'
+import type { Config, LogLevel, OutputFormat, Theme, ToolName } from '../core/types.ts'
 
-const collectMcp = (v: string, prev: string[]) => [
+const collectRules = (v: string, prev: string[]) => [
   ...prev,
   ...v.split(',').map((s) => s.trim()).filter(Boolean),
 ]
@@ -33,67 +39,84 @@ export function resolveOutputFormat(
 export function registerRunCommand(program: Command): void {
   program
     .argument('[prompt]', 'Instruction prompt for the agent')
-    .option('-p, --prompt <text>', 'Instruction prompt for the agent')
-    .option('--allow-read', 'Grant capability to read files and list directories (fs.read)')
-    .option('--no-allow-read', 'Deny capability to read files and list directories')
-    .option('--allow-edit', 'Grant capability to write and edit files (fs.write)')
-    .option('--no-allow-edit', 'Deny capability to write and edit files')
-    .option('--allow-bash', 'Grant capability to run shell commands (shell.run)')
-    .option('--no-allow-bash', 'Deny capability to run shell commands')
-    .option('--allow-destructive-bash', 'Grant capability to run destructive shell commands (shell.destructive)')
-    .option('--allow-sensitive', 'Grant capability to read sensitive files (fs.sensitive)')
-    .option('--allow-mcp <pattern>', 'Pre-authorize MCP tool calls (e.g. "github/*", "db/query", or "*")', collectMcp, [])
-    .option('--deny-mcp <pattern>', 'Explicitly deny MCP tool calls (e.g. "github/*", "db/query", or "*")', collectMcp, [])
+    .option('-p, --print', 'Run non-interactively in print mode')
+    .option('--tools <names>', 'Filter tools exposed to the model (e.g. "default" or "ReadFile,EditFile")')
+    .option('--allowed-tools <rule>', 'Rule approving tool execution (e.g. "Bash", "Bash(git diff *)")', collectRules, [])
+    .option('--disallowed-tools <rule>', 'Rule denying tool execution (e.g. "Bash(rm *)", "WriteFile")', collectRules, [])
+    .option('--permission-mode <mode>', 'Permission mode: default | plan | acceptEdits | dontAsk | bypassPermissions')
+    .option('--dangerously-skip-permissions', 'Bypass all tool execution permission checks')
+    .option('--bare', 'Suppress ambient ~/.ant/settings.json and project MCP discovery')
+    .option('--no-session-persistence', 'Disable session transcripts, message storage, and checkpoints')
     .option('-m, --model <provider/model-id>', 'Model to use (format: provider/model-id)')
-    .option('-s, --max-steps <number>', 'Maximum tool execution steps')
+    .option('-s, --max-turns <number>', 'Maximum agent interaction turns')
     .option('-t, --timeout <duration>', 'Wall-clock timeout e.g. "30m", "10s"')
     .option('--retries <number>', 'Number of API request retries (0-10)')
-    .option('-o, --output <format>', 'Output format: text | md | json | stream-json')
+    .option('-o, --output-format <format>', 'Output format: text | md | json | stream-json')
     .option('-l, --log-level <level>', 'Log level: error | info | debug')
+    .option('--verbose', 'Emit rich diagnostic progress to stderr')
     .option('--theme <theme>', 'Theme: auto | dark | light | ansi')
-    .option('-e, --effort <level>', 'Reasoning effort: provider-default | none | minimal | low | medium | high | xhigh | max')
-    .option('--reasoning <level>', 'Alias for --effort')
+    .option('-e, --effort <level>', 'Reasoning effort: none | minimal | low | medium | high | xhigh | max')
+    .option('--append-system-prompt <text>', 'Append custom instructions after the base system prompt')
+    .option('--append-system-prompt-file <path>', 'Append instructions read from a file')
     .option('-c, --continue', 'Continue the latest conversation thread')
     .option('-r, --resume <thread_id>', 'Resume a specific conversation thread by ID')
     .action(async (positionalPrompt: string | undefined, options) => {
       try {
+        const rawArgs = process.argv.slice(2)
+        for (const arg of rawArgs) {
+          const flagName = arg.split('=')[0]
+          if (flagName && ['--max-budget-usd', '--input-format', '--permission-prompt-tool', '--permission-prompts'].includes(flagName)) {
+            throw new Error(`Unsupported option: "${flagName}". This feature is not supported in ant.`)
+          }
+        }
+
         if (options.continue && options.resume) {
           throw new Error('Cannot specify both --continue and --resume')
         }
-        if (options.prompt && positionalPrompt) {
-          throw new Error('Cannot specify both -p/--prompt flag and positional prompt')
+
+        if (!options.print && !options.continue && !options.resume) {
+          if (positionalPrompt) {
+            throw new Error(`ant requires -p/--print to run in print mode. Usage: ant -p "${positionalPrompt}"`)
+          }
+          program.help()
+          return
         }
 
-        const userSettings = loadSettings()
-        const env = process.env
-        const prompt = options.prompt ?? positionalPrompt
+        if (positionalPrompt !== undefined && positionalPrompt.trim() === '') {
+          throw new Error('Instruction prompt cannot be empty or whitespace only.')
+        }
 
-        // 2. Resolve model: CLI flag > env > settings.json (no hardcoded default)
+        const isBare = Boolean(options.bare)
+        const userSettings = isBare ? {} : loadSettings()
+        const env = process.env
+        const prompt = positionalPrompt?.trim() ? positionalPrompt : undefined
+
+        // 1. Resolve model: CLI flag > env > settings.json (no hardcoded default)
         const rawModel = options.model ?? env.ANT_MODEL ?? userSettings.model
         if (!rawModel) {
           throw new Error(
             'No model configured. Specify --model <provider/model-id>, set ANT_MODEL, or run "ant config set model <provider/model-id>".'
           )
         }
-        // Preflight model and credentials check
         resolveLanguageModel(rawModel, env)
         const model = rawModel
 
-        // 3. Resolve maxSteps: CLI > env > settings > 30
-        let maxSteps = 30
-        if (options.maxSteps !== undefined) {
-          maxSteps = parseIntStrict('--max-steps', options.maxSteps, { min: 1 })
-        } else if (env.ANT_MAX_STEPS) {
-          maxSteps = parseIntStrict('ANT_MAX_STEPS', env.ANT_MAX_STEPS, { min: 1 })
+        // 2. Resolve maxTurns: CLI > env > settings > 30
+        let maxTurns = 30
+        const rawTurns = options.maxTurns ?? env.ANT_MAX_TURNS ?? env.ANT_MAX_STEPS
+        if (rawTurns !== undefined) {
+          maxTurns = parseIntStrict('--max-turns', rawTurns, { min: 1 })
+        } else if (userSettings.maxTurns !== undefined && userSettings.maxTurns > 0) {
+          maxTurns = userSettings.maxTurns
         } else if (userSettings.maxSteps !== undefined && userSettings.maxSteps > 0) {
-          maxSteps = userSettings.maxSteps
+          maxTurns = userSettings.maxSteps
         }
 
-        // 4. Resolve timeout: CLI > env > settings > 30m
+        // 3. Resolve timeout: CLI > env > settings > 30m
         const rawTimeout = options.timeout ?? env.ANT_TIMEOUT ?? userSettings.timeout ?? '30m'
         const timeoutMs = parseDurationMs(rawTimeout)
 
-        // 5. Resolve retries: CLI > env > settings > 4
+        // 4. Resolve retries: CLI > env > settings > 4
         let retries = 4
         if (options.retries !== undefined) {
           retries = parseIntStrict('--retries', options.retries, { min: 0, max: 10 })
@@ -103,52 +126,109 @@ export function registerRunCommand(program: Command): void {
           retries = userSettings.retries
         }
 
-        // 6. Resolve output: CLI > env > settings > context-sensitive default (md on TTY, else text)
+        // 5. Resolve output format
         const outputFormat = resolveOutputFormat(
-          options.output,
-          env.ANT_OUTPUT,
-          userSettings.output,
+          options.outputFormat ?? options.output,
+          env.ANT_OUTPUT_FORMAT ?? env.ANT_OUTPUT,
+          userSettings.outputFormat ?? userSettings.output,
           Boolean(process.stdout.isTTY)
         )
 
-        // 7. Resolve logLevel: CLI > env > settings > info
+        // 6. Resolve logLevel & verbose
         const logLevel = (options.logLevel ?? env.ANT_LOG_LEVEL ?? userSettings.logLevel ?? 'info') as LogLevel
         if (logLevel !== 'error' && logLevel !== 'info' && logLevel !== 'debug') {
           throw new Error(`Invalid log-level: "${logLevel}". Allowed: error, info, debug`)
         }
+        const verbose = Boolean(options.verbose)
 
-        // 8. Resolve theme: CLI > env > settings > auto
+        // 7. Resolve theme: CLI > env > settings > auto
         const theme = (options.theme ?? env.ANT_THEME ?? userSettings.theme ?? 'auto') as Theme
         if (theme !== 'auto' && theme !== 'dark' && theme !== 'light' && theme !== 'ansi') {
           throw new Error(`Invalid theme: "${theme}". Allowed: auto, dark, light, ansi`)
         }
 
-        // 9. Resolve reasoning effort: CLI > env > settings > undefined
+        // 8. Resolve reasoning effort
         const rawEffort = options.effort ?? options.reasoning ?? env.ANT_EFFORT ?? env.ANT_REASONING ?? userSettings.reasoning
         const effort = rawEffort ? parseReasoning(String(rawEffort)) : undefined
 
-        // 10. Resolve capability grants: CLI flag > settings > false (never env vars)
-        const allowRead = options.allowRead !== undefined ? Boolean(options.allowRead) : Boolean(userSettings.allow?.read)
-        const allowEdit = options.allowEdit !== undefined ? Boolean(options.allowEdit) : Boolean(userSettings.allow?.edit)
-        const allowBash = options.allowBash !== undefined ? Boolean(options.allowBash) : Boolean(userSettings.allow?.bash)
-        const allowDestructiveBash = options.allowDestructiveBash !== undefined ? Boolean(options.allowDestructiveBash) : Boolean(userSettings.allow?.destructiveBash)
-        const allowSensitive = options.allowSensitive !== undefined ? Boolean(options.allowSensitive) : Boolean(userSettings.allow?.sensitive)
+        // 9. Resolve permission mode and rules
+        let permissionMode: PermissionMode = 'default'
+        if (options.dangerouslySkipPermissions) {
+          permissionMode = 'bypassPermissions'
+        } else if (options.permissionMode) {
+          const modeVal = options.permissionMode.trim()
+          if (modeVal === 'auto') {
+            throw new Error('Permission mode "auto" is not supported. Use "default", "plan", "acceptEdits", "dontAsk", or "bypassPermissions".')
+          }
+          if (
+            modeVal !== 'default' &&
+            modeVal !== 'plan' &&
+            modeVal !== 'acceptEdits' &&
+            modeVal !== 'dontAsk' &&
+            modeVal !== 'bypassPermissions'
+          ) {
+            throw new Error(`Invalid permission-mode: "${modeVal}". Allowed: default, plan, acceptEdits, dontAsk, bypassPermissions`)
+          }
+          permissionMode = modeVal as PermissionMode
+        } else if (userSettings.permissionMode) {
+          permissionMode = userSettings.permissionMode
+        }
 
-        const grants = resolveGrants({
-          allowRead,
-          allowEdit,
-          allowBash,
-          allowDestructiveBash,
-          allowSensitive,
+        const rawAllowedRules: string[] = [
+          ...(options.allowedTools ?? []),
+          ...(userSettings.allowedTools ?? []),
+        ]
+        const rawDisallowedRules: string[] = [
+          ...(options.disallowedTools ?? []),
+          ...(userSettings.disallowedTools ?? []),
+        ]
+
+        const allowedToolsRules: ParsedToolRule[] = rawAllowedRules.map((r) => parseToolRule(r))
+        const disallowedToolsRules: ParsedToolRule[] = rawDisallowedRules.map((r) => parseToolRule(r))
+
+        // Tools visibility filter
+        let toolsFilter: ToolName[] | undefined
+        if (options.tools) {
+          const filterStr = options.tools.trim()
+          if (filterStr !== 'default') {
+            const names = filterStr.split(',').map((x: string) => x.trim() as ToolName).filter(Boolean)
+            for (const n of names) {
+              if (!KNOWN_TOOLS.includes(n)) {
+                throw new Error(`Unknown tool "${n}" in --tools filter.`)
+              }
+            }
+            toolsFilter = names
+          }
+        }
+
+        // System prompt file validation (fail-fast)
+        let appendSystemPromptFileContent: string | undefined
+        if (options.appendSystemPromptFile) {
+          const filePath = options.appendSystemPromptFile
+          if (!existsSync(filePath)) {
+            throw new Error(`System prompt file not found: "${filePath}"`)
+          }
+          try {
+            appendSystemPromptFileContent = readFileSync(filePath, 'utf-8')
+          } catch (err) {
+            throw new Error(`Failed to read system prompt file "${filePath}": ${err instanceof Error ? err.message : String(err)}`)
+          }
+        }
+
+        let combinedSystemPrompt: string | undefined
+        const promptParts: string[] = []
+        if (options.appendSystemPrompt) promptParts.push(options.appendSystemPrompt)
+        if (appendSystemPromptFileContent) promptParts.push(appendSystemPromptFileContent)
+        if (promptParts.length > 0) {
+          combinedSystemPrompt = promptParts.join('\n\n')
+        }
+
+        const effectivePermissions = resolveEffectivePermissions({
+          mode: permissionMode,
+          allowedRules: allowedToolsRules,
+          disallowedRules: disallowedToolsRules,
+          exposedToolsFilter: toolsFilter,
         })
-
-        const allowedMcp = Array.isArray(options.allowMcp) && options.allowMcp.length > 0
-          ? (options.allowMcp as string[])
-          : undefined
-
-        const deniedMcp = Array.isArray(options.denyMcp) && options.denyMcp.length > 0
-          ? (options.denyMcp as string[])
-          : undefined
 
         let workspaceRoot = process.cwd()
         try {
@@ -164,19 +244,25 @@ export function registerRunCommand(program: Command): void {
           prompt,
           stdinInput,
           model,
-          maxSteps,
+          maxTurns,
           timeoutMs,
           retries,
           outputFormat,
           logLevel,
           theme,
           effort,
-          grants,
+          effectivePermissions,
           cwd: workspaceRoot,
           continueLatest: Boolean(options.continue),
           resumeThreadId: options.resume,
-          allowedMcp,
-          deniedMcp,
+          bare: isBare,
+          noSessionPersistence: options.sessionPersistence === false || Boolean(options.noSessionPersistence),
+          verbose,
+          toolsFilter,
+          permissionMode,
+          allowedToolsRules,
+          disallowedToolsRules,
+          appendSystemPrompt: combinedSystemPrompt,
           settings: userSettings,
         }
 

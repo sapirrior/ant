@@ -511,10 +511,12 @@ export class StderrLogger {
       )
     }
 
-    const checkpointHint = options.hasCheckpoints ? ' · undo: ant checkpoints' : ''
-    process.stderr.write(
-      `${this.fmt.muted('resume:')} ant -r ${this.fmt.accent(options.threadId)}${this.fmt.muted(checkpointHint)}\n`
-    )
+    if (options.threadId && options.threadId !== 'ephemeral') {
+      const checkpointHint = options.hasCheckpoints ? ' · undo: ant checkpoints' : ''
+      process.stderr.write(
+        `${this.fmt.muted('resume:')} ant -r ${this.fmt.accent(options.threadId)}${this.fmt.muted(checkpointHint)}\n`
+      )
+    }
   }
 }
 

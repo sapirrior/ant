@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { describeModelError, mapStatusToExitCode } from './agent.ts'
+import { describeModelError, mapStatusToExitCode, exitCodeForAbort, abortOutcome } from './agent.ts'
 import { APICallError, RetryError } from 'ai'
 
 describe('core/agent error description and status mapping', () => {
   it('maps execution statuses to standard CLI exit codes accurately', () => {
     expect(mapStatusToExitCode('completed')).toBe(0)
-    expect(mapStatusToExitCode('max_steps')).toBe(1)
+    expect(mapStatusToExitCode('max_turns')).toBe(1)
     expect(mapStatusToExitCode('truncated')).toBe(1)
     expect(mapStatusToExitCode('empty_response')).toBe(1)
     expect(mapStatusToExitCode('usage_error')).toBe(2)
@@ -86,5 +86,27 @@ describe('core/agent error description and status mapping', () => {
     const msg = describeModelError(noOutputErr)
     expect(msg).toContain('model returned no output')
     expect(msg).toContain('reasoning effort')
+  })
+
+  it('accurately resolves exit codes and outcomes for signal aborts and timeouts', () => {
+    expect(exitCodeForAbort('timeout')).toBe(4)
+    expect(exitCodeForAbort('SIGTERM')).toBe(143)
+    expect(exitCodeForAbort('SIGHUP')).toBe(129)
+    expect(exitCodeForAbort('SIGPIPE' as any)).toBe(141)
+    expect(exitCodeForAbort('SIGINT')).toBe(130)
+
+    const c1 = new AbortController()
+    c1.abort('timeout')
+    const outcomeTimeout = abortOutcome(c1.signal, 2, 'partial text')
+    expect(outcomeTimeout.status).toBe('timeout')
+    expect(outcomeTimeout.exitCode).toBe(4)
+    expect(outcomeTimeout.text).toBe('partial text')
+    expect(outcomeTimeout.error).toContain('timed out')
+
+    const c2 = new AbortController()
+    c2.abort('SIGTERM')
+    const outcomeSigterm = abortOutcome(c2.signal, 1, '')
+    expect(outcomeSigterm.status).toBe('cancelled')
+    expect(outcomeSigterm.exitCode).toBe(143)
   })
 })

@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createEditFileTool } from './EditFileTool.ts'
+import { resolveEffectivePermissions } from '../../policy/toolPermissions.ts'
 import type { ToolExecutionContext, ToolExecutionResult } from '../../core/types.ts'
 
 describe('EditFileTool', () => {
@@ -17,10 +18,11 @@ describe('EditFileTool', () => {
     testFile = join(testDir, 'sample.txt')
     context = {
       cwd: testDir,
-      grants: {
-        has: (cap) => cap === 'fs.write' || cap === 'fs.read',
-        capabilities: new Set(['fs.write', 'fs.read']),
-      },
+      effectivePermissions: resolveEffectivePermissions({
+        mode: 'acceptEdits',
+        allowedRules: [],
+        disallowedRules: [],
+      }),
     }
     writeFileSync(testFile, 'line 1\nline 2\nline 3\n', 'utf-8')
   })

@@ -15,15 +15,20 @@ export const toolSettingsSchema = z.strictObject({
 
 export const settingsSchema = z.object({
   model: z.string().optional(),
+  maxTurns: z.number().int().min(1).optional(),
   maxSteps: z.number().int().min(1).optional(),
   timeout: z.union([z.string(), z.number().int().min(0)]).optional(),
   retries: z.number().int().min(0).optional(),
   streamRetries: z.number().int().min(0).optional(),
+  outputFormat: z.enum(['text', 'md', 'json', 'stream-json']).optional(),
   output: z.enum(['text', 'md', 'json', 'stream-json']).optional(),
   reasoning: z.enum(['none', 'low', 'medium', 'high', 'max']).optional(),
   effort: z.enum(['none', 'low', 'medium', 'high', 'max']).optional(),
   logLevel: z.enum(['error', 'info', 'debug']).optional(),
   theme: z.enum(['auto', 'dark', 'light', 'ansi']).optional(),
+  permissionMode: z.enum(['default', 'plan', 'acceptEdits', 'dontAsk', 'bypassPermissions']).optional(),
+  allowedTools: z.array(z.string()).optional(),
+  disallowedTools: z.array(z.string()).optional(),
   allow: z.strictObject({
     read: z.boolean().optional(),
     edit: z.boolean().optional(),
@@ -46,14 +51,19 @@ export interface ToolSettings {
 
 export interface Settings {
   model?: string
+  maxTurns?: number
   maxSteps?: number
   timeout?: string
   retries?: number
   streamRetries?: number
+  outputFormat?: 'text' | 'md' | 'json' | 'stream-json'
   output?: 'text' | 'md' | 'json' | 'stream-json'
   reasoning?: ReasoningEffort
   logLevel?: 'error' | 'info' | 'debug'
   theme?: 'auto' | 'dark' | 'light' | 'ansi'
+  permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'dontAsk' | 'bypassPermissions'
+  allowedTools?: string[]
+  disallowedTools?: string[]
   allow?: {
     read?: boolean
     edit?: boolean
@@ -69,6 +79,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  maxTurns: 30,
   maxSteps: 30,
   timeout: '30m',
   retries: 4,
@@ -295,13 +306,33 @@ export const KEYS: Record<string, KeyDefinition> = {
     set: (s, v) => { s.model = v as string },
     unset: (s) => { delete s.model },
   },
+  maxTurns: {
+    key: 'maxTurns',
+    describe: 'Maximum agent execution turns (positive integer)',
+    parse: (v) => parsePositiveInt(v, 'maxTurns'),
+    get: (s) => s.maxTurns ?? s.maxSteps,
+    set: (s, v) => {
+      s.maxTurns = v as number
+      s.maxSteps = v as number
+    },
+    unset: (s) => {
+      delete s.maxTurns
+      delete s.maxSteps
+    },
+  },
   maxSteps: {
     key: 'maxSteps',
-    describe: 'Maximum agent execution steps (positive integer)',
+    describe: 'Alias for maxTurns',
     parse: (v) => parsePositiveInt(v, 'maxSteps'),
-    get: (s) => s.maxSteps,
-    set: (s, v) => { s.maxSteps = v as number },
-    unset: (s) => { delete s.maxSteps },
+    get: (s) => s.maxTurns ?? s.maxSteps,
+    set: (s, v) => {
+      s.maxTurns = v as number
+      s.maxSteps = v as number
+    },
+    unset: (s) => {
+      delete s.maxTurns
+      delete s.maxSteps
+    },
   },
   timeout: {
     key: 'timeout',
@@ -342,18 +373,43 @@ export const KEYS: Record<string, KeyDefinition> = {
     set: (s, v) => { s.streamRetries = v as number },
     unset: (s) => { delete s.streamRetries },
   },
+  outputFormat: {
+    key: 'outputFormat',
+    describe: 'Output format: text | md | json | stream-json',
+    parse: (v) => {
+      if (v !== 'text' && v !== 'md' && v !== 'json' && v !== 'stream-json') {
+        throw new Error(`Setting "outputFormat" must be "text", "md", "json", or "stream-json" (got "${v}")`)
+      }
+      return v
+    },
+    get: (s) => s.outputFormat ?? s.output,
+    set: (s, v) => {
+      s.outputFormat = v as 'text' | 'md' | 'json' | 'stream-json'
+      s.output = v as 'text' | 'md' | 'json' | 'stream-json'
+    },
+    unset: (s) => {
+      delete s.outputFormat
+      delete s.output
+    },
+  },
   output: {
     key: 'output',
-    describe: 'Output format: text | md | json | stream-json',
+    describe: 'Alias for outputFormat',
     parse: (v) => {
       if (v !== 'text' && v !== 'md' && v !== 'json' && v !== 'stream-json') {
         throw new Error(`Setting "output" must be "text", "md", "json", or "stream-json" (got "${v}")`)
       }
       return v
     },
-    get: (s) => s.output,
-    set: (s, v) => { s.output = v as 'text' | 'md' | 'json' | 'stream-json' },
-    unset: (s) => { delete s.output },
+    get: (s) => s.outputFormat ?? s.output,
+    set: (s, v) => {
+      s.outputFormat = v as 'text' | 'md' | 'json' | 'stream-json'
+      s.output = v as 'text' | 'md' | 'json' | 'stream-json'
+    },
+    unset: (s) => {
+      delete s.outputFormat
+      delete s.output
+    },
   },
   logLevel: {
     key: 'logLevel',

@@ -60,20 +60,37 @@ export function buildResultEnvelope(
   outcome: ModelOutcome,
   meta?: Partial<OutputSinkOptions>
 ): ResultEnvelope {
-  const durationMs = meta?.startTime ? Date.now() - meta.startTime : undefined
-  const raw: Record<string, unknown> = {
-    schemaVersion: 1,
-    status: outcome.status,
-    exitCode: outcome.exitCode,
-    text: outcome.text ?? '',
-    threadId: meta?.threadId,
-    steps: outcome.stepsExecuted ?? 0,
-    usage: outcome.usage ?? null,
-    checkpoints: meta?.checkpoints ?? [],
-    error: outcome.error ?? null,
-    model: meta?.model ?? null,
+  const durationMs = meta?.startTime ? Date.now() - meta.startTime : 0
+  const isError = outcome.status !== 'completed'
+  const subtype = outcome.status === 'completed' ? 'success' : outcome.status
+
+  const raw = {
+    schema_version: 1,
+    type: 'result' as const,
+    subtype,
+    is_error: isError,
+    exit_code: outcome.exitCode,
+    result: outcome.text || null,
+    error: isError
+      ? {
+          code: outcome.status,
+          message: outcome.error || `Execution ended with status: ${outcome.status}`,
+        }
+      : null,
+    session_id: meta?.threadId && meta.threadId !== 'ephemeral' ? meta.threadId : null,
+    num_turns: outcome.stepsExecuted ?? 0,
+    duration_ms: durationMs,
+    model: meta?.model ?? '',
     effort: meta?.effort ?? null,
-    durationMs,
+    usage: outcome.usage
+      ? {
+          input_tokens: outcome.usage.inputTokens,
+          output_tokens: outcome.usage.outputTokens,
+          total_tokens: outcome.usage.totalTokens,
+          cached_tokens: outcome.usage.cachedTokens ?? 0,
+        }
+      : null,
+    checkpoints: meta?.checkpoints ?? [],
     warnings: [],
   }
 
@@ -83,11 +100,19 @@ export function buildResultEnvelope(
   }
 
   return {
-    schemaVersion: 1,
-    status: outcome.status,
-    exitCode: outcome.exitCode,
-    text: outcome.text ?? '',
-    steps: outcome.stepsExecuted ?? 0,
+    schema_version: 1,
+    type: 'result' as const,
+    subtype,
+    is_error: isError,
+    exit_code: outcome.exitCode,
+    result: outcome.text || null,
+    error: isError ? { code: outcome.status, message: outcome.error ?? '' } : null,
+    session_id: meta?.threadId && meta.threadId !== 'ephemeral' ? meta.threadId : null,
+    num_turns: outcome.stepsExecuted ?? 0,
+    duration_ms: durationMs,
+    model: meta?.model ?? '',
+    effort: meta?.effort ?? null,
+    usage: null,
     checkpoints: meta?.checkpoints ?? [],
     warnings: [`Schema validation warning: ${parsed.error.message}`],
   }
@@ -122,7 +147,7 @@ export class StreamJsonSink implements OutputSink {
 
   private writeLine(eventData: Record<string, unknown>): void {
     const event = {
-      schemaVersion: 1,
+      schema_version: 1,
       seq: this.seq++,
       ts: new Date().toISOString(),
       ...eventData,
@@ -131,20 +156,23 @@ export class StreamJsonSink implements OutputSink {
   }
 
   emitInit(initData: {
-    threadId: string
+    threadId?: string
     model: string
     provider?: string
-    cwd: string
+    cwd?: string
     effort?: string | null
-    grants: string[]
+    permissionMode?: string
     tools: string[]
-    resumed: boolean
+    resumed?: boolean
     modelChangedFrom?: string | null
   }): void {
     this.writeLine({
       type: 'init',
-      ...initData,
-      antVersion: pkg.version,
+      model: initData.model,
+      permission_mode: initData.permissionMode ?? 'default',
+      tools: initData.tools,
+      session_id: initData.threadId && initData.threadId !== 'ephemeral' ? initData.threadId : null,
+      ant_version: pkg.version,
     })
   }
 
@@ -152,7 +180,7 @@ export class StreamJsonSink implements OutputSink {
     switch (event.type) {
       case 'text-delta': {
         this.writeLine({
-          type: 'text',
+          type: 'text-delta',
           delta: event.delta,
         })
         break
@@ -160,37 +188,26 @@ export class StreamJsonSink implements OutputSink {
       case 'tool-call': {
         const { data, truncated, originalSize } = truncatePayload(event.input)
         this.writeLine({
-          type: 'tool_call',
-          callId: event.callId,
-          name: event.toolName,
+          type: 'tool-call',
+          call_id: event.callId,
+          tool: event.toolName,
           input: data,
           truncated,
-          originalSize,
+          original_size: originalSize,
         })
         break
       }
       case 'tool-result': {
         const { data, truncated, originalSize } = truncatePayload(event.output)
-        const ok = !event.isError
         this.writeLine({
-          type: 'tool_result',
-          callId: event.callId,
-          name: event.toolName,
-          ok,
-          error: event.isError ? (typeof event.output === 'string' ? event.output : 'Tool error') : null,
-          durationMs: event.durationMs,
+          type: 'tool-result',
+          call_id: event.callId,
+          tool: event.toolName,
           output: data,
+          duration_ms: event.durationMs,
+          is_error: Boolean(event.isError),
           truncated,
-          originalSize,
-        })
-        break
-      }
-      case 'step-finish': {
-        this.writeLine({
-          type: 'step',
-          stepNumber: event.stepNumber,
-          finishReason: event.finishReason,
-          usage: event.usage,
+          original_size: originalSize,
         })
         break
       }
@@ -201,7 +218,6 @@ export class StreamJsonSink implements OutputSink {
     const combinedMeta = { ...this.meta, ...meta }
     const envelope = buildResultEnvelope(outcome, combinedMeta)
     const resultEvent = {
-      type: 'result',
       seq: this.seq++,
       ts: new Date().toISOString(),
       ...envelope,

@@ -69,7 +69,7 @@ jobs:
 
       - name: Generate AI Release Notes with ant
         env:
-          GEMINI_API_KEY: ${{ secrets.ANT_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.ANT_API_KEY || secrets.GEMINI_API_KEY }}
         run: |
           TAG_NAME="${{ github.ref_name }}"
           PREV_TAG=$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || echo "")
@@ -100,7 +100,7 @@ jobs:
           # Prepare instruction prompt for ant
           PROMPT_FILE=$(mktemp)
           cat << 'EOF' > "$PROMPT_FILE"
-          You are an expert developer-advocate and release engineer writing GitHub Release Notes for `ant` (a daily-use autonomous developer AI CLI).
+          You are an expert release engineer writing GitHub Release Notes for the `ant` CLI codebase.
 
           Your task: Analyze the provided git commits, diff stats, and code diff to produce authoritative, high-signal, developer-friendly Release Notes in GitHub Flavored Markdown.
 
@@ -138,10 +138,10 @@ jobs:
           Context:
           $(cat $CONTEXT_FILE)"
 
-          # Run ant using google/gemini-flash-lite-latest with fallback
+          # Run ant using google/gemini-2.5-flash with fallback
           if [ -n "$GEMINI_API_KEY" ]; then
-            echo "Invoking ant with google/gemini-flash-lite-latest to generate release notes..."
-            if bun run src/main.ts -m "google/gemini-flash-lite-latest" -p "$AI_INPUT" -o text > release_notes.md 2>stderr.log; then
+            echo "Invoking ant with google/gemini-2.5-flash to generate release notes..."
+            if bun run src/main.ts -p "$AI_INPUT" -m "google/gemini-2.5-flash" --output-format text --bare --no-session-persistence > release_notes.md 2>stderr.log; then
               echo "AI release notes generated successfully."
             else
               echo "Warning: ant failed to generate release notes. Check stderr:"

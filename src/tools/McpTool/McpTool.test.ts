@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'bun:test'
 import { createMcpTool } from './McpTool.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
-import { resolveGrants } from '../../policy/grants.ts'
+import { resolveEffectivePermissions } from '../../policy/toolPermissions.ts'
 
 describe('McpTool agent boundary (src/tools/McpTool)', () => {
-  const dummyGrants = resolveGrants({})
+  const dummyEffectivePermissions = resolveEffectivePermissions({
+    mode: 'bypassPermissions',
+    allowedRules: [],
+    disallowedRules: [],
+  })
 
   it('validates required parameters and schema constraints', async () => {
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: dummyGrants,
+      effectivePermissions: dummyEffectivePermissions,
     }
 
     const tool = createMcpTool(mockContext)
@@ -39,18 +43,11 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     expect(res3.error).toContain('Missing required parameter "tool"')
   })
 
-  it('rejects execution when user denies prompt in interactive mode', async () => {
-    let confirmPrompted = false
+  it('rejects execution non-interactively when MCP tool requires explicit approval', async () => {
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: dummyGrants,
+      effectivePermissions: dummyEffectivePermissions,
       allowedMcpPatterns: [],
-      ui: {
-        confirm: () => {
-          confirmPrompted = true
-          return false // Deny permission
-        },
-      },
     }
 
     const tool = createMcpTool(mockContext)
@@ -59,13 +56,11 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
       { messages: [] }
     )
 
-    expect(confirmPrompted).toBe(true)
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('User denied permission')
+    expect(result.error).toContain('Permission denied: MCP tool "github/delete_repo" requires explicit approval')
   })
 
   it('allows execution without prompt when tool matches --allow-mcp pattern', async () => {
-    let confirmPrompted = false
     const fakeManager: any = {
       callTool: async (server: string, t: string, args: any) => {
         return { ok: true, output: { success: true, server, t, args } }
@@ -74,15 +69,9 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
 
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: dummyGrants,
+      effectivePermissions: dummyEffectivePermissions,
       mcpManager: fakeManager,
       allowedMcpPatterns: ['github/*'],
-      ui: {
-        confirm: () => {
-          confirmPrompted = true
-          return false
-        },
-      },
     }
 
     const tool = createMcpTool(mockContext)
@@ -91,8 +80,6 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
       { messages: [] }
     )
 
-    // Should NOT prompt because 'github/*' matches
-    expect(confirmPrompted).toBe(false)
     expect(result.ok).toBe(true)
     expect(result.output).toEqual({
       success: true,
@@ -103,18 +90,11 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
   })
 
   it('enforces --deny-mcp denial override even when allow wildcard is present', async () => {
-    let confirmPrompted = false
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: dummyGrants,
+      effectivePermissions: dummyEffectivePermissions,
       allowedMcpPatterns: ['*'], // allowed all
       deniedMcpPatterns: ['github/delete_repo'], // but explicitly denied delete_repo
-      ui: {
-        confirm: () => {
-          confirmPrompted = true
-          return false // user denies
-        },
-      },
     }
 
     const tool = createMcpTool(mockContext)
@@ -123,8 +103,6 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
       { messages: [] }
     )
 
-    // Tool MUST be denied directly by policy without even prompting user
-    expect(confirmPrompted).toBe(false)
     expect(result.ok).toBe(false)
     expect(result.error).toContain('denied by policy')
   })
@@ -135,7 +113,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
 
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: dummyGrants,
+      effectivePermissions: dummyEffectivePermissions,
       abortSignal: abortController.signal,
     }
 
@@ -155,7 +133,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     }
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      grants: dummyGrants,
+      effectivePermissions: dummyEffectivePermissions,
       mcpManager: fakeManager,
       allowedMcpPatterns: ['db/*', '*/read_*'],
       deniedMcpPatterns: ['db/drop_*'],

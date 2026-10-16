@@ -73,12 +73,15 @@ export function saveMcpConfigFile(filePath: string, config: McpConfigFile): void
   renameSync(tmpPath, filePath)
 }
 
-export function resolveMergedMcpServers(cwd: string = process.cwd()): Map<string, ResolvedMcpServer> {
+export function resolveMergedMcpServers(
+  cwd: string = process.cwd(),
+  options: { ignoreProjectScope?: boolean } = {}
+): Map<string, ResolvedMcpServer> {
   const globalPath = getGlobalMcpConfigPath()
   const projectPath = getProjectMcpConfigPath(cwd)
 
   const globalConfig = loadMcpConfigFile(globalPath)
-  const projectConfig = loadMcpConfigFile(projectPath)
+  const projectConfig = options.ignoreProjectScope ? { mcpServers: {} } : loadMcpConfigFile(projectPath)
 
   const map = new Map<string, ResolvedMcpServer>()
 

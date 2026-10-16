@@ -47,6 +47,28 @@ export async function executeWithPolicy<TInput, TOutput>(
       }
     }
 
+    // Centralized Permission Policy Check
+    if (context.effectivePermissions) {
+      const primaryArg =
+        typeof input === 'object' && input !== null
+          ? ((input as { path?: string; command?: string; tool?: string }).path ??
+             (input as { command?: string }).command ??
+             (input as { tool?: string }).tool ??
+             '')
+          : ''
+
+      const check = context.effectivePermissions.check(toolName as ToolName, String(primaryArg))
+      if (!check.allowed) {
+        return {
+          ok: false,
+          output: null as unknown as TOutput,
+          error: JSON.stringify({
+            error: `Permission denied: ${toolName} is not permitted. ${check.reason ?? ''}`.trim(),
+          }),
+        }
+      }
+    }
+
     try {
       const output = await Promise.race([
         action(input, context),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { createBashTool } from './BashTool.ts'
 import { TaskManagerRegistry } from '../tasks.ts'
+import { resolveEffectivePermissions } from '../../policy/toolPermissions.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
 
 describe('BashTool integration and execution', () => {
@@ -8,10 +9,22 @@ describe('BashTool integration and execution', () => {
 
   const mockOptions = { toolCallId: 'call_1', messages: [] as any, context: {} as any }
 
+  const bypassPermissions = resolveEffectivePermissions({
+    mode: 'bypassPermissions',
+    allowedRules: [],
+    disallowedRules: [],
+  })
+
+  const bashAllowedPermissions = resolveEffectivePermissions({
+    mode: 'default',
+    allowedRules: [{ raw: 'Bash', tool: 'Bash', pattern: null }],
+    disallowedRules: [],
+  })
+
   it('runs foreground command and captures exit status and output', async () => {
     const ctx: ToolExecutionContext = {
       cwd,
-      grants: { has: () => true, capabilities: new Set(['shell.run', 'shell.destructive']) },
+      effectivePermissions: bypassPermissions,
     }
 
     const bashTool = createBashTool(ctx)
@@ -32,7 +45,7 @@ describe('BashTool integration and execution', () => {
     try {
       const ctx: ToolExecutionContext = {
         cwd,
-        grants: { has: () => true, capabilities: new Set(['shell.run', 'shell.destructive']) },
+        effectivePermissions: bypassPermissions,
       }
 
       const bashTool = createBashTool(ctx)
@@ -55,7 +68,7 @@ describe('BashTool integration and execution', () => {
     const tasks = new TaskManagerRegistry()
     const ctx: ToolExecutionContext = {
       cwd,
-      grants: { has: () => true, capabilities: new Set(['shell.run', 'shell.destructive']) },
+      effectivePermissions: bypassPermissions,
       tasks,
       backgroundEnabled: true,
       foregroundMs: 300, // 300ms foreground window
@@ -81,7 +94,7 @@ describe('BashTool integration and execution', () => {
   it('terminates command and reports timed_out when foreground expires without TaskManager', async () => {
     const ctx: ToolExecutionContext = {
       cwd,
-      grants: { has: () => true, capabilities: new Set(['shell.run', 'shell.destructive']) },
+      effectivePermissions: bypassPermissions,
       backgroundEnabled: false,
       foregroundMs: 300,
     }
@@ -94,40 +107,36 @@ describe('BashTool integration and execution', () => {
     expect(result.output.error).toContain('Command timed out')
   })
 
-  it('denies commands classified as ask when user does not have destructive grant and no TTY', async () => {
+  it('denies commands classified as ask when user does not have bypass or rule non-interactively', async () => {
     const ctx: ToolExecutionContext = {
       cwd,
-      grants: { has: (c) => c === 'shell.run', capabilities: new Set(['shell.run']) },
-      ui: {
-        confirm: () => false, // User denies in prompt
-      },
+      effectivePermissions: bashAllowedPermissions,
     }
 
     const bashTool = createBashTool(ctx)
     const result = (await bashTool.execute({ command: 'rm some_file.txt' }, mockOptions)) as any
 
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('User denied permission')
+    expect(result.error).toContain('Potentially destructive command blocked by safety classifier')
   })
 
-  it('blocks commands classified as blocked without destructive grant, and permits under destructive grant', async () => {
-    const ctxNoDestructive: ToolExecutionContext = {
+  it('blocks commands classified as blocked without bypass, and permits under bypass', async () => {
+    const ctxBlocked: ToolExecutionContext = {
       cwd,
-      grants: { has: (c) => c === 'shell.run', capabilities: new Set(['shell.run']) },
+      effectivePermissions: bashAllowedPermissions,
     }
 
-    const bashToolBlocked = createBashTool(ctxNoDestructive)
+    const bashToolBlocked = createBashTool(ctxBlocked)
     const resultBlocked = (await bashToolBlocked.execute({ command: 'sudo rm -rf /' }, mockOptions)) as any
 
     expect(resultBlocked.ok).toBe(false)
     expect(resultBlocked.error).toContain('Command blocked by safety policy')
 
-    const ctxWithDestructive: ToolExecutionContext = {
+    const ctxBypass: ToolExecutionContext = {
       cwd,
-      grants: { has: () => true, capabilities: new Set(['shell.run', 'shell.destructive']) },
+      effectivePermissions: bypassPermissions,
     }
-    const bashToolAllowed = createBashTool(ctxWithDestructive)
-    // Run echo with sudo (mock/non-fatal) or check that policy does not block it early
+    const bashToolAllowed = createBashTool(ctxBypass)
     const resultAllowed = (await bashToolAllowed.execute({ command: 'echo "bypassed"' }, mockOptions)) as any
     expect(resultAllowed.ok).toBe(true)
   })

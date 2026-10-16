@@ -30,7 +30,7 @@ async function scanDirectory(
   regex: RegExp,
   matches: GrepMatch[],
   internalLimit: number,
-  hasSensitiveGrant: boolean
+  allowSensitive: boolean
 ): Promise<void> {
   if (matches.length >= internalLimit) return
 
@@ -41,10 +41,10 @@ async function scanDirectory(
     const fullPath = join(dirPath, entry.name)
     if (entry.isDirectory()) {
       if (!IGNORED_DIRS.has(entry.name)) {
-        await scanDirectory(fullPath, rootCwd, regex, matches, internalLimit, hasSensitiveGrant)
+        await scanDirectory(fullPath, rootCwd, regex, matches, internalLimit, allowSensitive)
       }
     } else if (entry.isFile()) {
-      if (isSensitivePath(fullPath) && !hasSensitiveGrant) {
+      if (isSensitivePath(fullPath) && !allowSensitive) {
         continue
       }
       try {
@@ -99,13 +99,13 @@ export function createGrepTool(context: ToolExecutionContext) {
 
         const internalLimit = maxResults + 1
         const matches: GrepMatch[] = []
-        const hasSensitiveGrant = Boolean(context.grants.has('fs.sensitive'))
+        const allowSensitive = context.effectivePermissions.mode === 'bypassPermissions'
 
         const stats = statSync(fullPath)
         if (stats.isDirectory()) {
-          await scanDirectory(fullPath, context.cwd, regex, matches, internalLimit, hasSensitiveGrant)
+          await scanDirectory(fullPath, context.cwd, regex, matches, internalLimit, allowSensitive)
         } else {
-          if (isSensitivePath(fullPath) && !hasSensitiveGrant) {
+          if (isSensitivePath(fullPath) && !allowSensitive) {
             throw new Error(`Access denied: searching sensitive file "${path}" requires explicit sensitive authorization.`)
           }
           if (stats.size > MAX_GREP_FILE_BYTES) {

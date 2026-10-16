@@ -1,243 +1,209 @@
-# ant 🐜
+<div align="center">
 
-> **A fast, model-agnostic AI agent CLI built for your daily terminal workflow.**
+# 🐜 ant
 
-`ant` is an autonomous developer companion designed for speed, safety, and scripting. It runs your terminal tasks, inspects code, edits files, and connects to any AI provider—streaming output in real time without getting stuck on interactive prompts.
+### **The post-modern autonomous print agent.**
+
+*Terminal-native. Model-agnostic. Headless by design. Instant time-travel rollback.*
+
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg?style=flat-square)](package.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
+[![Runtime](https://img.shields.io/badge/runtime-Bun%20%7C%20Node-black.svg?style=flat-square)](https://bun.sh)
+
+```bash
+git diff | ant -p "Review this patch for edge cases and regressions"
+```
+
+</div>
 
 ---
 
-## ✨ Why ant?
+## ⚡ What is `ant`?
 
-* ⚡ **Model Agnostic** — Switch seamlessly between Anthropic, Google Gemini, OpenRouter, or custom OpenAI-compatible models.
-* 🛡️ **Built-in Safety & Reversible Edits** — Automatic file snapshots before any modification. Made a mistake? Rewind with `ant checkpoints restore`.
-* 🔒 **Safe Shell Execution** — Allowlist-based command analyzer prevents accidental or rogue destructive commands.
-* 🔄 **Multi-turn Context & Resumable Sessions** — Continue conversations right where you left off in any repository.
-* 🌐 **Built-in Search & Web Fetch** — Search the web and read documentation directly within the agent loop.
-* 🔌 **Model Context Protocol (MCP)** — Seamlessly connect stdio or HTTP/SSE servers globally (`~/.ant/mcp.json`) or per project (`.ant/mcp.json`).
-* 🤖 **Pipe & Automation Friendly** — Clean `stdout` for pipes and scripts (`-o json` or `-o stream-json`), with rich diagnostics sent to `stderr`.
+Most AI engineering agents want to be your chat room. They lock your terminal behind full-screen TUIs, demand manual interactive approvals for every single file edit, trap you in proprietary provider ecosystems, and leave no trace when an autonomous edit goes wrong.
 
----
+**`ant` is built differently.**
 
-## 🚀 Quickstart
+Designed around the Unix philosophy, `ant` runs as a high-velocity, headless **print agent**. It executes one-shot tasks, performs multi-file surgical refactors, connects to external tools via MCP, and emits clean text or structured streams directly to `stdout`—while keeping all diagnostics, live progress, and headers on `stderr`.
 
-### 1. Install
-
-**Using the official installer (Recommended):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/sapirrior/ant/main/installer/install.sh | bash
-```
-
-**Or build from source:**
-```bash
-git clone https://github.com/sapirrior/ant.git
-cd ant
-npm install
-bun run build
-```
-
-### 2. Configure Your Model
-
-`ant` features a modular provider adapter architecture powered by the Vercel AI SDK. Set your API key and default model once:
-
-```bash
-# Google Gemini (with developer-grade safety thresholds)
-export GEMINI_API_KEY="your-api-key"
-ant config set model google/gemini-2.5-flash
-
-# Anthropic Claude (with automatic ephemeral prompt caching)
-export ANTHROPIC_API_KEY="your-api-key"
-ant config set model anthropic/claude-3-7-sonnet-20250219
-
-# OpenAI (with automatic server-side prefix caching)
-export OPENAI_API_KEY="your-api-key"
-ant config set model openai/gpt-4o
-
-# Groq (Ultra-fast LPU inference)
-export GROQ_API_KEY="your-api-key"
-ant config set model groq/llama-3.3-70b-versatile
-
-# xAI Grok
-export XAI_API_KEY="your-api-key"
-ant config set model xai/grok-2-1212
-
-# DeepSeek (Reasoner & automatic context caching)
-export DEEPSEEK_API_KEY="your-api-key"
-ant config set model deepseek/deepseek-chat
-
-# OpenRouter (Multi-model gateway)
-export OPENROUTER_API_KEY="your-api-key"
-ant config set model openrouter/openrouter/free
-
-# Ollama (Local, offline, zero API key required by default)
-ant config set model ollama/llama3
-# Optional custom base URL & key: export OLLAMA_BASE_URL="http://192.168.1.50:11434/v1"
-
-# Custom OpenAI-Compatible Endpoints
-export ANT_CUSTOM_BASE_URL="http://localhost:8000/v1"
-ant config set model custom/my-model
-```
-
-### ⚡ Built-in Provider Optimizations
-- **Anthropic Prompt Caching**: System instructions and conversation context automatically receive ephemeral cache breakpoints (`cacheControl: { type: 'ephemeral' }`), cutting input costs by up to 90% and slashing latency on multi-turn sessions.
-- **Google Developer Safety Settings**: Gemini models run with developer-tuned safety thresholds (`BLOCK_ONLY_HIGH`) to avoid false-positive refusals during codebase inspection, bash scripts, and regex audits.
-- **OpenAI & DeepSeek Prefix Caching**: Prompt structure and tool declarations maintain strict deterministic ordering for optimal server-side prefix cache hit rates.
-
-### 3. Run Your First Command
-
-```bash
-# Ask a direct question
-ant "Explain how to write a custom middleware in Hono"
-
-# Let ant inspect and fix your code
-ant --allow-edit "Fix the failing tests in src/auth.ts"
-```
+No interactive prompts. No `/dev/tty` blocking. Just pure terminal autonomy.
 
 ---
 
-## 💡 Daily Workflows & Examples
+## 🌟 Superpowers
 
-### 🔍 Codebase Inspection
-```bash
-ant --allow-read "Find all endpoints in this project and check for missing error handling"
+```
+                                  ┌───────────────────────────┐
+                                  │   ant -p "Fix auth bug"   │
+                                  └─────────────┬─────────────┘
+                                                │
+                 ┌──────────────────────────────┼──────────────────────────────┐
+                 ▼                              ▼                              ▼
+      ┌─────────────────────┐        ┌─────────────────────┐        ┌─────────────────────┐
+      │   Model Agnostic    │        │ Time-Travel Rollback│        │  Unix Composability │
+      │ Gemini, Claude,     │        │ Instant CAS snapshot│        │ stdout: Clean result│
+      │ OpenAI, DeepSeek,   │        │ before every edit   │        │ stderr: Diagnostics │
+      │ Ollama (Local)      │        │ ant checkpoints undo│        │ pipes cleanly to jq │
+      └─────────────────────┘        └─────────────────────┘        └─────────────────────┘
 ```
 
-### 🛠️ Surgical Edits & Refactoring
+### 1. 🖨️ True Print-Native Execution
+Canonical `ant -p "..."` headless execution. Feed it a task, stream results in real time, and let your scripts inspect standard POSIX exit codes (`0` for success, non-zero for failures). Perfect for local CLI aliases, git hooks, and unattended CI/CD runners.
+
+### 2. ⏪ Time-Travel Checkpoints (Instant Undo)
+Never worry about an autonomous agent corrupting your codebase. Before modifying, creating, or deleting a file, `ant` creates content-addressed snapshots in a lightweight local SQLite store. If an edit wasn't what you wanted, preview and rewind instantly:
 ```bash
-ant --allow-edit "Migrate all imports in src/ from CommonJS to ES modules"
-```
-
-### 💻 Autonomous Shell Runs & Testing
-```bash
-ant --allow-bash "Run test suite, find why tests failed, and give me a summary"
-```
-
-### 🔄 Multi-turn Conversations
-```bash
-# Start a task
-ant --allow-read "Inspect package.json and list outdated dependencies"
-
-# Follow up in the same thread
-ant --continue "Which of these have breaking major version changes?"
-
-# Resume a specific thread later
-ant --resume <thread_id> "Let's proceed with upgrading the first package"
-```
-
-### ⏪ Instant Undo with Checkpoints
-Every edit is backed up automatically:
-```bash
-# View recent changes made by ant
-ant checkpoints list
-
-# Preview rollback
-ant checkpoints restore 1 --dry-run
-
-# Restore files to before the change
 ant checkpoints restore 1
 ```
 
-### 🔌 Model Context Protocol (MCP)
-Extend `ant` with external tools via MCP:
+### 3. 🌐 Zero Provider Lock-In
+Switch models with a single flag. Powered by the Vercel AI SDK, `ant` comes out of the box with tuned adapters for:
+* **Anthropic** (automatic ephemeral prompt caching)
+* **Google Gemini** (developer-grade safety settings)
+* **OpenAI & DeepSeek** (server-side prefix cache alignment)
+* **Groq & xAI** (ultra-fast inference)
+* **Ollama** (offline, 100% private local models)
+* **OpenAI-Compatible** custom gateways
 
-```bash
-# Add a local stdio MCP server (e.g., SQLite, Git, Filesystem)
-ant mcp add git --command "mcp-server-git" --args "--repository" "."
+### 4. 🛡️ Deterministic Permission Policies
+Unattended runs should never hang waiting for a human to press `[y/N]`. Tool access is governed by strict, declarative modes:
+* `default` — Safe read-only inspection. Mutations denied without explicit rule.
+* `acceptEdits` — Auto-approves workspace file edits; isolates shell commands.
+* `plan` — Pure reconnaissance; mutating tools are hidden from the model.
+* `bypassPermissions` — Full autonomous execution for sandboxed environments.
 
-# Add a remote HTTP/SSE MCP server
-ant mcp add browserless --url "https://mcp.browserless.io/mcp" --header "Authorization=Bearer <token>"
-
-# Add to global config (~/.ant/mcp.json) instead of project
-ant mcp add my-tool --command "npx" --args "-y" "my-mcp-tool" --global
-
-# List configured servers across project and global scopes
-ant mcp list
-
-# Enable or disable servers without deleting them
-ant mcp disable git
-ant mcp enable git
-
-# Pre-authorize MCP tools during run (or use interactive confirmation)
-# Pre-authorize MCP tools during run (or use interactive confirmation)
-ant "Analyze git log" --allow-mcp "git/*"
-
-# Explicitly deny specific MCP tools during run (supports glob patterns)
-ant "Analyze repo" --deny-mcp "git/delete_*"
-```
-
-> **Security Note on MCP Scoping:** Project-scoped MCP servers (`.ant/mcp.json`) are isolated from ambient environment variables for repository security. For servers requiring sensitive system tokens (e.g. personal access tokens), configure them in global configuration (`~/.ant/mcp.json` or `ant mcp add ... --global`).
+### 5. 🔄 Resumable Sessions & Context Continuation
+Continue a multi-turn conversation thread seamlessly (`ant -p -c "Now write unit tests"`), swap the model mid-session, or run fully ephemeral runs with `--no-session-persistence`.
 
 ---
 
-## ⚙️ Configuration
+## 🚀 Quickstart in 30 Seconds
 
-Settings are saved in `~/.ant/settings.json` and can be managed with `ant config`:
+### 1. Install
 
 ```bash
-ant config                           # View current configuration
-ant config get model                 # Get specific configuration value
-ant config set model <provider/id>   # Set default model
-ant config set allow.read true       # Enable read permission by default
-ant config set allow.bash true       # Enable bash permission by default
-ant config set allow.sensitive true  # Enable reading sensitive files by default
-ant config set allow.mcp "git/*"     # Pre-authorize MCP tools by default
-ant config set deny.mcp "git/delete" # Deny specific MCP tools by default
-ant config set effort medium         # Set reasoning effort (low, medium, high)
-ant config set timeout 10m           # Set default task timeout (e.g. 10m, 30s)
+# Instant installer
+curl -fsSL https://raw.githubusercontent.com/sapirrior/ant/main/installer/install.sh | bash
+
+# Or build from source
+git clone https://github.com/sapirrior/ant.git && cd ant
+bun install && bun run build
 ```
 
-**Precedence:** CLI flags > Environment variables > Saved settings.
+### 2. Configure Your Provider
+
+Set your key and default model once:
+
+```bash
+# Google Gemini
+export GEMINI_API_KEY="your-api-key"
+ant config set model google/gemini-2.5-flash
+
+# Anthropic
+export ANTHROPIC_API_KEY="your-api-key"
+ant config set model anthropic/claude-3-7-sonnet-20250219
+
+# OpenAI
+export OPENAI_API_KEY="your-api-key"
+ant config set model openai/gpt-4o
+
+# Local Ollama (zero API key required)
+ant config set model ollama/llama3
+```
+
+### 3. Run
+
+```bash
+# Ask questions directly (rendered Markdown in terminal, plain text in pipes)
+ant -p "Explain the design patterns used in src/core"
+
+# Autonomous coding with safe file edits
+ant -p "Refactor src/utils/format.ts to export visibleWidth" --permission-mode acceptEdits
+
+# Allow specific shell test commands
+ant -p "Fix the failing test in agent.test.ts" --permission-mode acceptEdits --allowed-tools "Bash(bun test *)"
+```
 
 ---
 
-## 🔌 Headless & Scripting (CI/CD)
+## 💡 Real-World Recipes
 
-Integrate `ant` into your shell scripts, editors, or CI pipelines:
-
+### 🔍 Pipe Git Diffs for Instant Code Review
 ```bash
-# Pipe diffs or logs directly through stdin
-git diff | ant "Review these changes for bugs"
-
-# Single JSON result to stdout (clean stdout for piping)
-ant -p "Summarize git diff" --allow-read -o json | jq -r '.text'
-
-# Real-time event stream (NDJSON)
-ant -p "Build project" --allow-bash -o stream-json
+git diff main | ant -p "Review this patch for memory leaks, performance bugs, and edge cases"
 ```
 
-### 🐜 Dogfooding: `ant` Releases `ant`
+### 📊 Extract Structured JSON for CI Automation
+```bash
+ant -p "List all exported functions in src/tools/index.ts" -o json | jq -r '.result'
+```
 
-We believe in using what we build. In our GitHub Actions release pipeline, `ant` runs autonomously to draft its own release notes:
-1. Whenever a version tag (e.g. `v0.1.1`) is pushed, CI cross-compiles all binaries and extracts the git diff.
-2. `ant` is called in headless mode with `google/gemini-flash-lite-latest` to read the commits and diff stats.
-3. `ant` synthesizes executive summaries, highlights, and categorized changelogs directly into GitHub Releases.
+### ⚡ Stream Real-Time NDJSON Events
+```bash
+ant -p "Build project and inspect compiler output" -o stream-json | grep --line-buffered '"type":"tool-call"'
+```
 
-Every release note you see on the [Releases page](https://github.com/sapirrior/ant/releases) was written by `ant` itself! 🚀
+### 🔄 Multi-turn Iteration
+```bash
+# Start a task
+ant -p "Inspect package.json and identify dependencies that have major version bumps"
+
+# Follow up in the same thread
+ant -p -c "Which of those major updates introduce breaking changes?"
+
+# Resume any past session by ID
+ant -p -r th_1792139027_b1efa8d0 "Let's begin upgrading the first package"
+```
+
+### ⏪ Checkpoint Rewind (Undo Mistakes)
+```bash
+# View all recent changes made by ant
+ant checkpoints list
+
+# Dry-run preview of what rolling back checkpoint #1 would do
+ant checkpoints restore 1 --dry-run
+
+# Restore files to exact state before the change
+ant checkpoints restore 1
+```
 
 ---
 
-## 📖 CLI Reference
+## 🎛️ CLI Reference
 
-| Flag | Description |
-|---|---|
-| `-p, --prompt <text>` | Instruction prompt (or pass as positional argument / pipe via stdin) |
-| `-m, --model <id>` | Target model (`google/...`, `anthropic/...`, `openrouter/...`) |
-| `-e, --effort <level>` | Reasoning effort (`none`, `low`, `medium`, `high`, `max`) |
-| `--allow-read` | Allow reading files and listing directories |
-| `--allow-edit` | Allow editing and writing files |
-| `--allow-bash` | Allow running safe shell commands |
-| `--allow-destructive-bash` | Allow destructive shell commands without prompt |
-| `--allow-sensitive` | Allow reading sensitive/secret files (`.env`, `credentials`, etc.) |
-| `--allow-mcp <pattern>` | Pre-authorize MCP tools (repeatable, e.g. `github/*`, `db/*`, or `*`) |
-| `--deny-mcp <pattern>` | Explicitly deny MCP tools during execution (overrides allow) |
-| `-c, --continue` | Continue the latest session in the current directory |
-| `-r, --resume <id>` | Resume a specific session by thread ID |
-| `-o, --output <format>` | Output format: `text`, `md`, `json`, `stream-json` |
-| `-t, --timeout <dur>` | Execution timeout (`30s`, `10m`, `1h`, or ms >= 1000; `0` = disabled) |
-| `-s, --max-steps <num>` | Maximum tool execution steps (default: 30) |
-| `--theme <theme>` | Terminal theme mode: `auto`, `dark`, `light`, `ansi` |
+```
+Usage: ant [options] [prompt]
+
+The post-modern autonomous print agent
+
+Arguments:
+  prompt                                Instruction prompt for the agent
+
+Options:
+  -p, --print                           Run non-interactively in print mode
+  --permission-mode <mode>              default | plan | acceptEdits | dontAsk | bypassPermissions
+  --allowed-tools <rule>                Allow tool rule (e.g. "Bash", "Bash(git diff *)")
+  --disallowed-tools <rule>             Deny tool rule (overrides allow rules)
+  --dangerously-skip-permissions        Bypass all tool permission checks
+  --tools <names>                       Filter exposed tools (e.g. "default" or "ReadFile,EditFile")
+  -o, --output-format <format>          text | md | json | stream-json
+  -m, --model <provider/model-id>       Model override (e.g. google/gemini-2.5-flash)
+  -s, --max-turns <number>              Maximum interaction turns before stopping (default: 30)
+  -t, --timeout <duration>              Wall-clock timeout e.g. "30m", "10s" (default: 30m)
+  -e, --effort <level>                  Reasoning effort: none | low | medium | high | max
+  --bare                                Suppress ambient ~/.ant/settings.json and project MCP
+  --no-session-persistence             Run ephemerally without saving history or snapshots
+  -c, --continue                        Continue the latest conversation thread
+  -r, --resume <thread_id>              Resume a specific conversation thread by ID
+  -l, --log-level <level>               Log level: error | info | debug (default: info)
+  --verbose                             Emit diagnostic progress to stderr
+  --theme <theme>                       auto | dark | light | ansi (default: auto)
+  -v, --version                         Output version number
+  -h, --help                            Display help
+```
 
 ---
 
 ## 📄 License
 
-MIT
+MIT © [sapirrior](https://github.com/sapirrior)
