@@ -14,6 +14,8 @@
   "scripts": {
     "start": "bun --no-env-file run src/main.ts",
     "dev": "bun --no-env-file --watch run src/main.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "bundle": "bun build --target=bun src/main.ts --outfile=dist/ant.js && chmod +x dist/ant.js",
@@ -42,6 +44,7 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
+    "prettier": "3.9.10",
     "typescript": "^5"
   }
 }
