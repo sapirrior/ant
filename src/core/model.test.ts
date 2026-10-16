@@ -14,7 +14,9 @@ describe('model registry', () => {
   })
 
   it('rejects provider without slash in model string', () => {
-    expect(() => parseModelString('google:gemini-2.5-flash')).toThrow(/Expected "provider\/model-id"/)
+    expect(() => parseModelString('google:gemini-2.5-flash')).toThrow(
+      /Expected "provider\/model-id"/,
+    )
   })
 
   it('allows model IDs with colons such as tags (B-029)', () => {
@@ -28,11 +30,15 @@ describe('model registry', () => {
   })
 
   it('throws when Google key is missing', () => {
-    expect(() => resolveLanguageModel('google/gemini-2.5-flash', {})).toThrow(/GOOGLE_GENERATIVE_AI_API_KEY/)
+    expect(() => resolveLanguageModel('google/gemini-2.5-flash', {})).toThrow(
+      /GOOGLE_GENERATIVE_AI_API_KEY/,
+    )
   })
 
   it('throws when OpenRouter key is missing', () => {
-    expect(() => resolveLanguageModel('openrouter/openrouter/free', {})).toThrow(/OPENROUTER_API_KEY/)
+    expect(() => resolveLanguageModel('openrouter/openrouter/free', {})).toThrow(
+      /OPENROUTER_API_KEY/,
+    )
   })
 
   it('throws when custom base URL is missing', () => {

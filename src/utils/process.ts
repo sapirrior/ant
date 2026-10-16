@@ -7,7 +7,12 @@ export function pidAlive(pid: number): boolean {
     process.kill(pid, 0)
     return true
   } catch (err: unknown) {
-    if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EPERM') {
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code: string }).code === 'EPERM'
+    ) {
       return true
     }
     return false

@@ -30,7 +30,7 @@ async function scanDirectory(
   regex: RegExp,
   matches: GrepMatch[],
   internalLimit: number,
-  allowSensitive: boolean
+  allowSensitive: boolean,
 ): Promise<void> {
   if (matches.length >= internalLimit) return
 
@@ -99,7 +99,8 @@ export function createGrepTool(context: ToolExecutionContext) {
 
         const relPath = relToRoot(context.cwd, fullPath)
         const isExplicit = context.effectivePermissions?.check('Grep', relPath)?.isExplicitRule
-        const allowSensitive = context.effectivePermissions.mode === 'bypassPermissions' || Boolean(isExplicit)
+        const allowSensitive =
+          context.effectivePermissions.mode === 'bypassPermissions' || Boolean(isExplicit)
 
         const internalLimit = maxResults + 1
         const matches: GrepMatch[] = []
@@ -109,10 +110,14 @@ export function createGrepTool(context: ToolExecutionContext) {
           await scanDirectory(fullPath, context.cwd, regex, matches, internalLimit, allowSensitive)
         } else {
           if (isSensitivePath(fullPath) && !allowSensitive) {
-            throw new Error(`Access denied: searching sensitive file "${path}" requires explicit allow rule or bypass.`)
+            throw new Error(
+              `Access denied: searching sensitive file "${path}" requires explicit allow rule or bypass.`,
+            )
           }
           if (stats.size > MAX_GREP_FILE_BYTES) {
-            throw new Error(`File "${path}" is too large to grep (${Math.round(stats.size / (1024 * 1024))} MiB). Limit is 2 MiB.`)
+            throw new Error(
+              `File "${path}" is too large to grep (${Math.round(stats.size / (1024 * 1024))} MiB). Limit is 2 MiB.`,
+            )
           }
           const buf = await readFile(fullPath)
           if (buf.includes(0)) {

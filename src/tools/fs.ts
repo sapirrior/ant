@@ -49,7 +49,7 @@ export function snapshot(absPath: string): FileSnapshot | null {
 
   if (stat.size > MAX_CHECKPOINT_BYTES) {
     throw new Error(
-      `File "${basename(absPath)}" (${stat.size} bytes) exceeds maximum snapshot limit of 20 MiB. Mutation refused.`
+      `File "${basename(absPath)}" (${stat.size} bytes) exceeds maximum snapshot limit of 20 MiB. Mutation refused.`,
     )
   }
 

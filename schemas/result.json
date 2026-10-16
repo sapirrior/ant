@@ -25,7 +25,10 @@
     "num_turns": { "type": "integer", "minimum": 1, "example": 2 },
     "duration_ms": { "type": "integer", "minimum": 0, "example": 1420 },
     "model": { "type": "string", "example": "google/gemini-2.5-flash" },
-    "effort": { "type": ["string", "null"], "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", null] },
+    "effort": {
+      "type": ["string", "null"],
+      "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", null]
+    },
     "usage": {
       "type": "object",
       "properties": {

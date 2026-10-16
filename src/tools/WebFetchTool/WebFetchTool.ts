@@ -8,7 +8,14 @@ import { decodeEntities } from '../../utils/html.ts'
 
 export const webFetchInputSchema = z.object({
   url: z.string().url().describe('The web page URL to fetch.'),
-  maxChars: z.number().int().min(500).max(100000).optional().default(25000).describe('Maximum characters of formatted text/markdown to return (default 25000).'),
+  maxChars: z
+    .number()
+    .int()
+    .min(500)
+    .max(100000)
+    .optional()
+    .default(25000)
+    .describe('Maximum characters of formatted text/markdown to return (default 25000).'),
 })
 
 export function describeWebFetch(input: z.infer<typeof webFetchInputSchema>): string {
@@ -56,7 +63,9 @@ export function transformHtmlToReadableMarkdown(html: string): { title: string; 
     .replace(/<aside\b[^<]*(?:(?!<\/aside>)<[^<]*)*<\/aside>/gi, ' ')
 
   // 4. Focus on main / article content if available
-  const mainMatch = clean.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i) || clean.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
+  const mainMatch =
+    clean.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i) ||
+    clean.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)
   if (mainMatch && mainMatch[1]!.length > 200) {
     clean = mainMatch[1]!
   }
@@ -111,7 +120,10 @@ export function transformHtmlToReadableMarkdown(html: string): { title: string; 
 }
 
 function cleanText(raw: string): string {
-  return raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export function chunkText(text: string, maxChunkChars = 8000): string[] {
@@ -179,15 +191,19 @@ export function createWebFetchTool(context: ToolExecutionContext) {
             }
 
             if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-              throw new Error(`Invalid protocol "${parsedUrl.protocol}". Only http: and https: are allowed.`)
+              throw new Error(
+                `Invalid protocol "${parsedUrl.protocol}". Only http: and https: are allowed.`,
+              )
             }
 
             await validatePublicHost(parsedUrl.hostname)
 
             const resp = await fetch(currentUrl, {
               headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+                'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                Accept:
+                  'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
               },
               redirect: 'manual',
               signal: controller.signal,
@@ -218,7 +234,9 @@ export function createWebFetchTool(context: ToolExecutionContext) {
             contentType.includes('application/xhtml+xml')
 
           if (!isAllowedType) {
-            throw new Error(`Unsupported content type "${contentType}". Only text and HTML/XML/JSON content are supported.`)
+            throw new Error(
+              `Unsupported content type "${contentType}". Only text and HTML/XML/JSON content are supported.`,
+            )
           }
 
           const isHtml = contentType.includes('html')

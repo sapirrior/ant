@@ -9,7 +9,7 @@ export interface ToolDescriptionInfo {
 
 export function buildInstructions(
   config: Config,
-  tools: readonly ToolDescriptionInfo[] = []
+  tools: readonly ToolDescriptionInfo[] = [],
 ): string {
   const now = new Date()
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -17,12 +17,15 @@ export function buildInstructions(
   const isGit = existsSync(join(config.cwd, '.git'))
   const permissionMode = config.effectivePermissions.mode
 
-  const hasBash = tools.some((t) => t.name === 'Bash') || config.effectivePermissions.exposedTools.includes('Bash')
+  const hasBash =
+    tools.some((t) => t.name === 'Bash') ||
+    config.effectivePermissions.exposedTools.includes('Bash')
   const hasTaskManager = tools.some((t) => t.name === 'TaskManager')
 
-  const toolLines = tools.length > 0
-    ? tools.map((t) => `- ${t.name}: ${t.description ?? 'Available tool'}`).join('\n')
-    : config.effectivePermissions.exposedTools.map((t) => `- ${t}: Available tool`).join('\n')
+  const toolLines =
+    tools.length > 0
+      ? tools.map((t) => `- ${t.name}: ${t.description ?? 'Available tool'}`).join('\n')
+      : config.effectivePermissions.exposedTools.map((t) => `- ${t}: Available tool`).join('\n')
 
   const sections: string[] = [
     `You are ant, an autonomous, terminal-native AI software engineering agent. You solve coding tasks, analyze repositories, fix bugs, and execute workflows with speed and engineering precision.`,

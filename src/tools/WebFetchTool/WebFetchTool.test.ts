@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import {
-  chunkText,
-  transformHtmlToReadableMarkdown,
-} from './WebFetchTool.ts'
+import { chunkText, transformHtmlToReadableMarkdown } from './WebFetchTool.ts'
 
 describe('WebFetchTool HTML-to-markdown transformation and chunking', () => {
   it('strips script, style, nav, and footers while preserving headers and text', () => {

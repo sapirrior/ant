@@ -27,7 +27,9 @@ export const WebSearchSchema = z.object({
   allowedDomains: z
     .array(z.string())
     .optional()
-    .describe('Optional list of domains to restrict search results to (e.g. ["github.com", "bun.sh"]).'),
+    .describe(
+      'Optional list of domains to restrict search results to (e.g. ["github.com", "bun.sh"]).',
+    ),
   blockedDomains: z
     .array(z.string())
     .optional()
@@ -95,7 +97,11 @@ export function summarizeWebSearch(output: unknown): string {
   return 'done'
 }
 
-export function parseDuckDuckGoResults(html: string, params: WebSearchInput, effectiveLimit: number): WebSearchHit[] {
+export function parseDuckDuckGoResults(
+  html: string,
+  params: WebSearchInput,
+  effectiveLimit: number,
+): WebSearchHit[] {
   const results: WebSearchHit[] = []
 
   // Split on result blocks as in example.ts
@@ -115,10 +121,10 @@ export function parseDuckDuckGoResults(html: string, params: WebSearchInput, eff
     if (block.includes('badge--ad') || block.includes('result--ad')) continue
 
     const titleMatch = block.match(
-      /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i
+      /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i,
     )
     const snippetMatch = block.match(
-      /<(?:a|div|span)[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/i
+      /<(?:a|div|span)[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/i,
     )
 
     if (titleMatch && titleMatch[1]) {
@@ -169,12 +175,12 @@ export function parseDuckDuckGoResults(html: string, params: WebSearchInput, eff
 
 export async function executeWebSearch(
   params: WebSearchInput,
-  context?: ToolExecutionContext
+  context?: ToolExecutionContext,
 ): Promise<{ text: string; data: WebSearchData }> {
   const startTime = Date.now()
   const effectiveLimit = Math.min(
     Math.max(1, params.limit ?? DEFAULT_SEARCH_LIMIT),
-    MAX_SEARCH_LIMIT
+    MAX_SEARCH_LIMIT,
   )
 
   let queryWithSite = params.query
@@ -211,7 +217,9 @@ export async function executeWebSearch(
     let html: string
     try {
       if (!response.ok) {
-        throw new Error(`DuckDuckGo web search failed with HTTP status ${response.status} (${response.statusText})`)
+        throw new Error(
+          `DuckDuckGo web search failed with HTTP status ${response.status} (${response.statusText})`,
+        )
       }
       html = await response.text()
     } finally {

@@ -33,7 +33,10 @@
     },
     "is_error": { "type": "boolean", "const": true },
     "exit_code": { "type": "integer", "minimum": 1, "example": 1 },
-    "result": { "type": ["string", "null"], "example": "Partial output generated before reaching turn limit" },
+    "result": {
+      "type": ["string", "null"],
+      "example": "Partial output generated before reaching turn limit"
+    },
     "error": {
       "type": "object",
       "required": ["code", "message"],

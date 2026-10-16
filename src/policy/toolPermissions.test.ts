@@ -95,12 +95,18 @@ describe('primaryArg resolution (fixes N1, N6)', () => {
   })
 
   it('resolves WebFetch host correctly', () => {
-    expect(primaryArg('WebFetch', { url: 'https://api.github.com/v1/repos' }, cwd)).toBe('api.github.com')
+    expect(primaryArg('WebFetch', { url: 'https://api.github.com/v1/repos' }, cwd)).toBe(
+      'api.github.com',
+    )
   })
 
   it('resolves McpTool action/tool format correctly', () => {
-    expect(primaryArg('McpTool', { action: 'call', server: 'github', tool: 'get_repo' }, cwd)).toBe('github/get_repo')
-    expect(primaryArg('McpTool', { action: 'list_tools', server: 'github' }, cwd)).toBe('github/list_tools')
+    expect(primaryArg('McpTool', { action: 'call', server: 'github', tool: 'get_repo' }, cwd)).toBe(
+      'github/get_repo',
+    )
+    expect(primaryArg('McpTool', { action: 'list_tools', server: 'github' }, cwd)).toBe(
+      'github/list_tools',
+    )
   })
 })
 
@@ -210,5 +216,15 @@ describe('resolveEffectivePermissions', () => {
     expect(bashWildcard.check('Bash', 'git status; rm -rf /').allowed).toBe(false)
     expect(bashWildcard.check('Bash', 'cat file | sh').allowed).toBe(false)
     expect(bashWildcard.check('Bash', 'echo $(whoami)').allowed).toBe(false)
+  })
+
+  it('fails closed when exposedToolsFilter is explicitly empty', () => {
+    const emptyFilter = resolveEffectivePermissions({
+      mode: 'default',
+      allowedRules: [],
+      disallowedRules: [],
+      exposedToolsFilter: [],
+    })
+    expect(emptyFilter.exposedTools).toEqual([])
   })
 })

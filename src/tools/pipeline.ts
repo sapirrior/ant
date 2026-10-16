@@ -9,9 +9,7 @@ export function raceWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Pr
   return new Promise((resolve, reject) => {
     const onAbort = () => reject(new Error(`Execution aborted: ${signal.reason ?? 'user signal'}`))
     signal.addEventListener('abort', onAbort, { once: true })
-    promise
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener('abort', onAbort))
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
   })
 }
 
@@ -37,14 +35,17 @@ export async function executeWithPolicy<TInput, TOutput>(
   toolName: ToolName | 'McpTool',
   input: TInput,
   context: ToolExecutionContext,
-  action: (input: TInput, context: ToolExecutionContext) => Promise<TOutput>
+  action: (input: TInput, context: ToolExecutionContext) => Promise<TOutput>,
 ): Promise<ToolExecutionResult<TOutput>> {
   const runner = async (): Promise<ToolExecutionResult<TOutput>> => {
     if (context.abortSignal?.aborted) {
       return {
         ok: false,
         output: null as unknown as TOutput,
-        error: toolName === 'McpTool' ? 'Execution aborted' : `Execution of ${toolName} aborted by user signal.`,
+        error:
+          toolName === 'McpTool'
+            ? 'Execution aborted'
+            : `Execution of ${toolName} aborted by user signal.`,
       }
     }
 

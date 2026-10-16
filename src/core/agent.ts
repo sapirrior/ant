@@ -25,7 +25,7 @@ export function exitCodeForAbort(reason: AbortReason | undefined): ExitCode {
   if (reason === 'timeout') return 4
   if (reason === 'SIGTERM') return 143
   if (reason === 'SIGHUP') return 129
-  if (reason === 'SIGPIPE' as any) return 141
+  if (reason === ('SIGPIPE' as any)) return 141
   return 130
 }
 
@@ -40,10 +40,10 @@ export function abortOutcome(signal: AbortSignal, stepsExecuted: number, text = 
   const error = isTimeout
     ? 'Execution timed out.'
     : isSighup
-    ? 'Operation aborted by hangup signal (SIGHUP).'
-    : isSigterm
-    ? 'Operation terminated by system signal (SIGTERM).'
-    : 'Operation aborted by user signal.'
+      ? 'Operation aborted by hangup signal (SIGHUP).'
+      : isSigterm
+        ? 'Operation terminated by system signal (SIGTERM).'
+        : 'Operation aborted by user signal.'
 
   return {
     status,
@@ -98,16 +98,18 @@ export function describeModelError(err: unknown, modelProvider?: string): string
   if (APICallError.isInstance(target) || StreamProviderError.isInstance(target)) {
     const apiErr = target as any
     const statusCode = apiErr.statusCode ?? apiErr.status
-    const bodyText = typeof apiErr.responseBody === 'string'
-      ? apiErr.responseBody
-      : typeof apiErr.message === 'string'
-      ? apiErr.message
-      : ''
+    const bodyText =
+      typeof apiErr.responseBody === 'string'
+        ? apiErr.responseBody
+        : typeof apiErr.message === 'string'
+          ? apiErr.message
+          : ''
 
     if (statusCode === 401 || statusCode === 403) {
-      const envVars = modelProvider && PROVIDERS[modelProvider]?.env
-        ? PROVIDERS[modelProvider]!.env.join(' or ')
-        : 'API key'
+      const envVars =
+        modelProvider && PROVIDERS[modelProvider]?.env
+          ? PROVIDERS[modelProvider]!.env.join(' or ')
+          : 'API key'
       return `authentication failed — check ${envVars}`
     }
 
@@ -119,7 +121,10 @@ export function describeModelError(err: unknown, modelProvider?: string): string
       return `provider error ${statusCode} after retry attempts`
     }
 
-    if (statusCode === 400 && /(context (length|window)|maximum context|prompt is too long|too many tokens)/i.test(bodyText)) {
+    if (
+      statusCode === 400 &&
+      /(context (length|window)|maximum context|prompt is too long|too many tokens)/i.test(bodyText)
+    ) {
       return 'context too long — start a new thread'
     }
 
@@ -147,7 +152,11 @@ export function describeModelError(err: unknown, modelProvider?: string): string
     if (typeof obj.error === 'string') {
       return obj.error
     }
-    if (obj.error && typeof obj.error === 'object' && typeof (obj.error as any).message === 'string') {
+    if (
+      obj.error &&
+      typeof obj.error === 'object' &&
+      typeof (obj.error as any).message === 'string'
+    ) {
       return (obj.error as any).message
     }
     try {
@@ -167,7 +176,7 @@ export interface RunAgentContext {
 }
 
 export async function runAgent(
-  options: ModelRunOptions & { agentContext?: RunAgentContext }
+  options: ModelRunOptions & { agentContext?: RunAgentContext },
 ): Promise<ModelOutcome> {
   const { config, messages, signal, threadId, onCheckpoint, onEvent, agentContext } = options
   const { model, provider, adapter } = resolveLanguageModel(config.model)

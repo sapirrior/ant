@@ -15,7 +15,7 @@ export interface McpToolCallResult {
 }
 
 function buildCleanSubprocessEnv(
-  declaredEnv: Readonly<Record<string, string>> = {}
+  declaredEnv: Readonly<Record<string, string>> = {},
 ): Record<string, string> {
   const env: Record<string, string> = {}
   const secretPattern = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)/i
@@ -174,7 +174,7 @@ export class McpClientManager {
   async callTool(
     serverName: string,
     toolName: string,
-    args: Record<string, unknown> = {}
+    args: Record<string, unknown> = {},
   ): Promise<McpToolCallResult> {
     try {
       const client = await this.getClient(serverName)
@@ -221,7 +221,7 @@ export class McpClientManager {
       promises.push(
         client.close().catch(() => {
           // Suppress close error on shutdown
-        })
+        }),
       )
     }
     this.activeClients.clear()

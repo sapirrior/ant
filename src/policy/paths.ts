@@ -8,13 +8,17 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
  */
 export function resolveWithinRoot(targetPath: string, rootDir: string): string {
   const resolvedRoot = existsSync(rootDir) ? realpathSync(resolve(rootDir)) : resolve(rootDir)
-  const resolvedTarget = isAbsolute(targetPath) ? resolve(targetPath) : resolve(resolvedRoot, targetPath)
+  const resolvedTarget = isAbsolute(targetPath)
+    ? resolve(targetPath)
+    : resolve(resolvedRoot, targetPath)
 
   const rel = relative(resolvedRoot, resolvedTarget)
 
   // If relative path is '..' or starts with '../', or is an absolute drive jump, it escaped root
   if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-    throw new Error(`Access denied: path "${targetPath}" resolves to "${resolvedTarget}", which is outside workspace root "${resolvedRoot}".`)
+    throw new Error(
+      `Access denied: path "${targetPath}" resolves to "${resolvedTarget}", which is outside workspace root "${resolvedRoot}".`,
+    )
   }
 
   // Check realpath if target exists or if an existing ancestor is inside an existing root
@@ -30,7 +34,9 @@ export function resolveWithinRoot(targetPath: string, rootDir: string): string {
       const realAncestor = realpathSync(current)
       const relReal = relative(resolvedRoot, realAncestor)
       if (relReal === '..' || relReal.startsWith(`..${sep}`) || isAbsolute(relReal)) {
-        throw new Error(`Access denied: path "${targetPath}" traverses symlink escaping workspace root "${resolvedRoot}".`)
+        throw new Error(
+          `Access denied: path "${targetPath}" traverses symlink escaping workspace root "${resolvedRoot}".`,
+        )
       }
     }
   }
@@ -49,4 +55,3 @@ export function relToRoot(rootDir: string, absOrRel: string): string {
   const rel = relative(rootDir, absOrRel)
   return rel ? rel.split(sep).join('/') : '.'
 }
-

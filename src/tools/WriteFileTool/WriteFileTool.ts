@@ -24,7 +24,7 @@ export function createWriteFileTool(context: ToolExecutionContext) {
         const buf = Buffer.from(content, 'utf-8')
         if (buf.length > MAX_CHECKPOINT_BYTES) {
           throw new Error(
-            `File content (${buf.length} bytes) exceeds maximum snapshot limit of 20 MiB. Mutation refused.`
+            `File content (${buf.length} bytes) exceeds maximum snapshot limit of 20 MiB. Mutation refused.`,
           )
         }
 
@@ -34,7 +34,9 @@ export function createWriteFileTool(context: ToolExecutionContext) {
         // 2. CAS #1 guard: if file existed, require prior read in this run and verify it hasn't changed
         if (before !== null) {
           if (!context.readState || !context.readState.has(relPath)) {
-            throw new Error('File exists but was not read in this session. Read it with ReadFile before overwriting.')
+            throw new Error(
+              'File exists but was not read in this session. Read it with ReadFile before overwriting.',
+            )
           }
           const lastReadHash = context.readState.get(relPath)
           if (lastReadHash !== before.hash) {

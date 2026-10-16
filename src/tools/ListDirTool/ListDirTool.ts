@@ -39,10 +39,10 @@ export function createListDirTool(context: ToolExecutionContext) {
           type: entry.isDirectory()
             ? 'directory'
             : entry.isFile()
-            ? 'file'
-            : entry.isSymbolicLink()
-            ? 'symlink'
-            : 'other',
+              ? 'file'
+              : entry.isSymbolicLink()
+                ? 'symlink'
+                : 'other',
         }))
 
         return {

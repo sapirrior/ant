@@ -48,7 +48,7 @@ describe('MCP core subsystem (src/mcp)', () => {
       'global',
       'docs',
       { transport: 'http', url: 'https://global.docs.com', enabled: true },
-      tempProject
+      tempProject,
     )
 
     // 3. Add server "git" project-level with different command
@@ -82,7 +82,7 @@ describe('MCP core subsystem (src/mcp)', () => {
       'project',
       'test-srv',
       { transport: 'stdio', command: 'echo', enabled: true },
-      tempProject
+      tempProject,
     )
 
     let merged = resolveMergedMcpServers(tempProject)
@@ -134,8 +134,8 @@ describe('MCP core subsystem (src/mcp)', () => {
         'project',
         `server-${i}`,
         { transport: 'stdio', command: `cmd-${i}`, enabled: true },
-        tempProject
-      )
+        tempProject,
+      ),
     )
 
     await Promise.all(promises)
@@ -167,7 +167,7 @@ describe('MCP core subsystem (src/mcp)', () => {
           hasAntKey: Boolean(receivedEnv.ANT_SOME_KEY),
           customVal: receivedEnv.MY_CUSTOM_VAR
         }) + "\\n");
-        `
+        `,
       )
 
       await addMcpServer(
@@ -180,7 +180,7 @@ describe('MCP core subsystem (src/mcp)', () => {
           env: { MY_CUSTOM_VAR: 'allowed-val' },
           enabled: true,
         },
-        tempProject
+        tempProject,
       )
 
       const manager = new McpClientManager({ cwd: tempProject })
@@ -189,7 +189,9 @@ describe('MCP core subsystem (src/mcp)', () => {
 
       // Verify that calling non-existent tool or connecting triggers connection
       // We test manager connection failure handling on bad command:
-      await expect(manager.getClient('nonexistent-server')).rejects.toThrow(/not found in configuration/)
+      await expect(manager.getClient('nonexistent-server')).rejects.toThrow(
+        /not found in configuration/,
+      )
     } finally {
       if (previousSecret !== undefined) process.env.GITHUB_TOKEN = previousSecret
       else delete process.env.GITHUB_TOKEN
@@ -204,7 +206,7 @@ describe('MCP core subsystem (src/mcp)', () => {
       'project',
       'disabled-srv',
       { transport: 'stdio', command: 'bun', enabled: false },
-      tempProject
+      tempProject,
     )
 
     const manager = new McpClientManager({ cwd: tempProject })

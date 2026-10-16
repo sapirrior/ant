@@ -9,22 +9,26 @@ import {
   KNOWN_TOOLS,
 } from '../policy/toolPermissions.ts'
 import { Engine } from '../core/engine.ts'
-import { resolveLanguageModel } from '../core/model.ts'
+import { validateModelConfig } from '../core/model.ts'
 import { loadSettings, parseDurationMs, parseReasoning } from '../settings/index.ts'
 import { parseIntStrict } from '../utils/number.ts'
 import { notice } from '../output/notice.ts'
 import type { Config, LogLevel, OutputFormat, Theme, ToolName } from '../core/types.ts'
+import { PERMISSION_MODES } from '../constants/index.ts'
 
 const collectRules = (v: string, prev: string[]) => [
   ...prev,
-  ...v.split(',').map((s) => s.trim()).filter(Boolean),
+  ...v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
 ]
 
 export function resolveOutputFormat(
   flagOutput?: string,
   envOutput?: string,
   settingsOutput?: string,
-  isStdoutTTY: boolean = Boolean(process.stdout.isTTY)
+  isStdoutTTY: boolean = Boolean(process.stdout.isTTY),
 ): OutputFormat {
   const chosen = flagOutput ?? envOutput ?? settingsOutput
   if (chosen) {
@@ -40,13 +44,32 @@ export function registerRunCommand(program: Command): void {
   program
     .argument('[prompt]', 'Instruction prompt for the agent')
     .option('-p, --print', 'Run non-interactively in print mode')
-    .option('--tools <names>', 'Filter tools exposed to the model (e.g. "default" or "ReadFile,EditFile")')
-    .option('--allowed-tools <rule>', 'Rule approving tool execution (e.g. "Bash", "Bash(git diff *)")', collectRules, [])
-    .option('--disallowed-tools <rule>', 'Rule denying tool execution (e.g. "Bash(rm *)", "WriteFile")', collectRules, [])
-    .option('--permission-mode <mode>', 'Permission mode: default | plan | acceptEdits | bypassPermissions')
+    .option(
+      '--tools <names>',
+      'Filter tools exposed to the model (e.g. "default" or "ReadFile,EditFile")',
+    )
+    .option(
+      '--allowed-tools <rule>',
+      'Rule approving tool execution (e.g. "Bash", "Bash(git diff *)")',
+      collectRules,
+      [],
+    )
+    .option(
+      '--disallowed-tools <rule>',
+      'Rule denying tool execution (e.g. "Bash(rm *)", "WriteFile")',
+      collectRules,
+      [],
+    )
+    .option(
+      '--permission-mode <mode>',
+      'Permission mode: default | plan | acceptEdits | bypassPermissions',
+    )
     .option('--dangerously-skip-permissions', 'Bypass all tool execution permission checks')
     .option('--bare', 'Suppress ambient ~/.ant/settings.json and project MCP discovery')
-    .option('--no-session-persistence', 'Disable session transcripts, message storage, and checkpoints')
+    .option(
+      '--no-session-persistence',
+      'Disable session transcripts, message storage, and checkpoints',
+    )
     .option('-m, --model <provider/model-id>', 'Model to use (format: provider/model-id)')
     .option('-s, --max-turns <number>', 'Maximum agent interaction turns')
     .option('-t, --timeout <duration>', 'Wall-clock timeout e.g. "30m", "10s"')
@@ -55,8 +78,14 @@ export function registerRunCommand(program: Command): void {
     .option('-l, --log-level <level>', 'Log level: error | info | debug')
     .option('--verbose', 'Emit rich diagnostic progress to stderr')
     .option('--theme <theme>', 'Theme: auto | dark | light | ansi')
-    .option('-e, --effort <level>', 'Reasoning effort: none | minimal | low | medium | high | xhigh | max')
-    .option('--append-system-prompt <text>', 'Append custom instructions after the base system prompt')
+    .option(
+      '-e, --effort <level>',
+      'Reasoning effort: none | minimal | low | medium | high | xhigh | max',
+    )
+    .option(
+      '--append-system-prompt <text>',
+      'Append custom instructions after the base system prompt',
+    )
     .option('--append-system-prompt-file <path>', 'Append instructions read from a file')
     .option('-c, --continue', 'Continue the latest conversation thread')
     .option('-r, --resume <thread_id>', 'Resume a specific conversation thread by ID')
@@ -65,8 +94,18 @@ export function registerRunCommand(program: Command): void {
         const rawArgs = process.argv.slice(2)
         for (const arg of rawArgs) {
           const flagName = arg.split('=')[0]
-          if (flagName && ['--max-budget-usd', '--input-format', '--permission-prompt-tool', '--permission-prompts'].includes(flagName)) {
-            throw new Error(`Unsupported option: "${flagName}". This feature is not supported in ant.`)
+          if (
+            flagName &&
+            [
+              '--max-budget-usd',
+              '--input-format',
+              '--permission-prompt-tool',
+              '--permission-prompts',
+            ].includes(flagName)
+          ) {
+            throw new Error(
+              `Unsupported option: "${flagName}". This feature is not supported in ant.`,
+            )
           }
         }
 
@@ -74,7 +113,12 @@ export function registerRunCommand(program: Command): void {
           throw new Error('Cannot specify both --continue and --resume')
         }
 
-        if (positionalPrompt === undefined && !options.continue && !options.resume && process.stdin.isTTY) {
+        if (
+          positionalPrompt === undefined &&
+          !options.continue &&
+          !options.resume &&
+          process.stdin.isTTY
+        ) {
           program.help()
           return
         }
@@ -92,10 +136,10 @@ export function registerRunCommand(program: Command): void {
         const rawModel = options.model ?? env.ANT_MODEL ?? userSettings.model
         if (!rawModel) {
           throw new Error(
-            'No model configured. Specify --model <provider/model-id>, set ANT_MODEL, or run "ant config set model <provider/model-id>".'
+            'No model configured. Specify --model <provider/model-id>, set ANT_MODEL, or run "ant config set model <provider/model-id>".',
           )
         }
-        resolveLanguageModel(rawModel, env)
+        validateModelConfig(rawModel, env)
         const model = rawModel
 
         // 2. Resolve maxTurns: CLI > env > settings > 30
@@ -128,12 +172,15 @@ export function registerRunCommand(program: Command): void {
           options.outputFormat,
           env.ANT_OUTPUT_FORMAT ?? env.ANT_OUTPUT,
           userSettings.outputFormat ?? userSettings.output,
-          Boolean(process.stdout.isTTY)
+          Boolean(process.stdout.isTTY),
         )
 
         // 6. Resolve logLevel & verbose
         const verbose = Boolean(options.verbose)
-        let logLevel = (options.logLevel ?? env.ANT_LOG_LEVEL ?? userSettings.logLevel ?? (verbose ? 'debug' : 'info')) as LogLevel
+        let logLevel = (options.logLevel ??
+          env.ANT_LOG_LEVEL ??
+          userSettings.logLevel ??
+          (verbose ? 'debug' : 'info')) as LogLevel
         if (logLevel !== 'error' && logLevel !== 'info' && logLevel !== 'debug') {
           throw new Error(`Invalid log-level: "${logLevel}". Allowed: error, info, debug`)
         }
@@ -145,7 +192,8 @@ export function registerRunCommand(program: Command): void {
         }
 
         // 8. Resolve reasoning effort
-        const rawEffort = options.effort ?? env.ANT_EFFORT ?? env.ANT_REASONING ?? userSettings.reasoning
+        const rawEffort =
+          options.effort ?? env.ANT_EFFORT ?? env.ANT_REASONING ?? userSettings.reasoning
         const effort = rawEffort ? parseReasoning(String(rawEffort)) : undefined
 
         // 9. Resolve permission mode and rules
@@ -154,16 +202,10 @@ export function registerRunCommand(program: Command): void {
           permissionMode = 'bypassPermissions'
         } else if (options.permissionMode) {
           const modeVal = options.permissionMode.trim()
-          if (modeVal === 'dontAsk') {
-            throw new Error('Permission mode "dontAsk" is not supported. Use "default", "plan", "acceptEdits", or "bypassPermissions".')
-          }
-          if (
-            modeVal !== 'default' &&
-            modeVal !== 'plan' &&
-            modeVal !== 'acceptEdits' &&
-            modeVal !== 'bypassPermissions'
-          ) {
-            throw new Error(`Invalid permission-mode: "${modeVal}". Allowed: default, plan, acceptEdits, bypassPermissions`)
+          if (!PERMISSION_MODES.includes(modeVal as PermissionMode)) {
+            throw new Error(
+              `Invalid permission-mode: "${modeVal}". Allowed: ${PERMISSION_MODES.join(', ')}`,
+            )
           }
           permissionMode = modeVal as PermissionMode
         } else if (userSettings.permissionMode) {
@@ -180,14 +222,21 @@ export function registerRunCommand(program: Command): void {
         ]
 
         const allowedToolsRules: ParsedToolRule[] = rawAllowedRules.map((r) => parseToolRule(r))
-        const disallowedToolsRules: ParsedToolRule[] = rawDisallowedRules.map((r) => parseToolRule(r))
+        const disallowedToolsRules: ParsedToolRule[] = rawDisallowedRules.map((r) =>
+          parseToolRule(r),
+        )
 
-        // Tools visibility filter
+        // Tools visibility filter: empty filter fails closed ([]), 'default' leaves undefined
         let toolsFilter: ToolName[] | undefined
-        if (options.tools) {
+        if (options.tools !== undefined) {
           const filterStr = options.tools.trim()
-          if (filterStr !== 'default') {
-            const names = filterStr.split(',').map((x: string) => x.trim() as ToolName).filter(Boolean)
+          if (filterStr === '') {
+            toolsFilter = []
+          } else if (filterStr !== 'default') {
+            const names = filterStr
+              .split(',')
+              .map((x: string) => x.trim() as ToolName)
+              .filter(Boolean)
             for (const n of names) {
               if (!KNOWN_TOOLS.includes(n)) {
                 throw new Error(`Unknown tool "${n}" in --tools filter.`)
@@ -207,7 +256,9 @@ export function registerRunCommand(program: Command): void {
           try {
             appendSystemPromptFileContent = readFileSync(filePath, 'utf-8')
           } catch (err) {
-            throw new Error(`Failed to read system prompt file "${filePath}": ${err instanceof Error ? err.message : String(err)}`)
+            throw new Error(
+              `Failed to read system prompt file "${filePath}": ${err instanceof Error ? err.message : String(err)}`,
+            )
           }
         }
 
@@ -235,7 +286,8 @@ export function registerRunCommand(program: Command): void {
         const runStartTime = Date.now()
         let stdinInput: string | undefined
         try {
-          const remainingStdinMs = timeoutMs > 0 ? Math.max(1, timeoutMs - (Date.now() - runStartTime)) : undefined
+          const remainingStdinMs =
+            timeoutMs > 0 ? Math.max(1, timeoutMs - (Date.now() - runStartTime)) : undefined
           stdinInput = await readPipedStdin(undefined, undefined, undefined, remainingStdinMs)
         } catch (err: any) {
           if (err.message?.includes('timed out waiting for piped stdin')) {
@@ -250,7 +302,8 @@ export function registerRunCommand(program: Command): void {
           throw new Error('No instruction provided. Pass a prompt or pipe input via stdin.')
         }
 
-        const remainingTimeoutMs = timeoutMs > 0 ? Math.max(1, timeoutMs - (Date.now() - runStartTime)) : 0
+        const remainingTimeoutMs =
+          timeoutMs > 0 ? Math.max(1, timeoutMs - (Date.now() - runStartTime)) : 0
 
         const config: Config = {
           prompt,
@@ -268,7 +321,8 @@ export function registerRunCommand(program: Command): void {
           continueLatest: Boolean(options.continue),
           resumeThreadId: options.resume,
           bare: isBare,
-          noSessionPersistence: options.sessionPersistence === false || Boolean(options.noSessionPersistence),
+          noSessionPersistence:
+            options.sessionPersistence === false || Boolean(options.noSessionPersistence),
           verbose,
           toolsFilter,
           permissionMode,

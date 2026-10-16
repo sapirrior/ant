@@ -124,7 +124,11 @@ export function acquireLease(db: Database, threadId: string): void {
   writeTx(db, () => {
     const row = db
       .query('SELECT lock_pid, lock_at, lock_host FROM threads WHERE id = ?')
-      .get(threadId) as { lock_pid: number | null; lock_at: number | null; lock_host: string | null } | null
+      .get(threadId) as {
+      lock_pid: number | null
+      lock_at: number | null
+      lock_host: string | null
+    } | null
 
     if (!row) {
       throw new Error(`Thread not found: "${threadId}"`)
@@ -136,12 +140,14 @@ export function acquireLease(db: Database, threadId: string): void {
       }
       const isSameHost = row.lock_host === null || row.lock_host === host
       const isDead = isSameHost ? !pidAlive(row.lock_pid) : false
-      const isStale = isSameHost && row.lock_at !== null && (Date.now() - row.lock_at > 30_000)
+      const isStale = isSameHost && row.lock_at !== null && Date.now() - row.lock_at > 30_000
 
       if (!isDead && !isStale) {
         const timeStr = row.lock_at ? new Date(row.lock_at).toISOString() : 'unknown time'
         const hostStr = row.lock_host ? ` on ${row.lock_host}` : ''
-        throw new Error(`thread ${threadId} is in use by pid ${row.lock_pid}${hostStr} since ${timeStr}`)
+        throw new Error(
+          `thread ${threadId} is in use by pid ${row.lock_pid}${hostStr} since ${timeStr}`,
+        )
       }
     }
 
@@ -155,8 +161,8 @@ export function acquireLease(db: Database, threadId: string): void {
 }
 
 export function releaseLease(db: Database, threadId: string): void {
-  db.run('UPDATE threads SET lock_pid = NULL, lock_at = NULL, lock_host = NULL WHERE id = ? AND lock_pid = ?', [
-    threadId,
-    process.pid,
-  ])
+  db.run(
+    'UPDATE threads SET lock_pid = NULL, lock_at = NULL, lock_host = NULL WHERE id = ? AND lock_pid = ?',
+    [threadId, process.pid],
+  )
 }

@@ -1,6 +1,7 @@
 import {
   PROVIDER_ADAPTERS,
   parseModelString,
+  validateModelConfig,
   resolveLanguageModel as resolveModelInternal,
   type ModelResolution as CoreModelResolution,
 } from './providers/index.ts'
@@ -24,14 +25,14 @@ export const PROVIDERS: Record<string, ProviderSpec> = Object.fromEntries(
       env: adapter.envVars,
       validateAuth: (env: NodeJS.ProcessEnv) => adapter.validateAuth(env),
     },
-  ])
+  ]),
 )
 
-export { parseModelString }
+export { parseModelString, validateModelConfig }
 
 export function resolveLanguageModel(
   rawModel: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): ModelResolution {
   return resolveModelInternal(rawModel, env)
 }

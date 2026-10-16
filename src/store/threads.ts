@@ -87,14 +87,17 @@ export function createThread(
     stdinInput?: string
     cwd: string
     model: string
-  }
+  },
 ): ThreadRecord {
   const id = generateThreadId()
   const now = Date.now()
 
   let rawTitle = options.prompt
   if (!rawTitle && options.stdinInput) {
-    const firstLine = options.stdinInput.split('\n').map((l) => l.trim()).find(Boolean)
+    const firstLine = options.stdinInput
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean)
     if (firstLine) rawTitle = firstLine
   }
   const title = formatTitle(rawTitle || 'New thread')
@@ -113,7 +116,7 @@ export function createThread(
       turns, messages, steps, input_tokens, output_tokens, lock_pid, lock_at
     ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, NULL, NULL)
     `,
-    [id, title, realCwd, options.model, now, now]
+    [id, title, realCwd, options.model, now, now],
   )
 
   const created = getThread(db, id)
@@ -130,7 +133,9 @@ export function resolveThreadId(db: Database, idOrPrefix: string, cwd?: string):
     }
 
     const row = db
-      .query('SELECT id FROM threads WHERE cwd = ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1')
+      .query(
+        'SELECT id FROM threads WHERE cwd = ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1',
+      )
       .get(targetCwd) as { id: string } | null
 
     if (!row) {
@@ -140,14 +145,18 @@ export function resolveThreadId(db: Database, idOrPrefix: string, cwd?: string):
   }
 
   // Exact match
-  const exact = db.query('SELECT id FROM threads WHERE id = ?').get(idOrPrefix) as { id: string } | null
+  const exact = db.query('SELECT id FROM threads WHERE id = ?').get(idOrPrefix) as {
+    id: string
+  } | null
   if (exact) {
     return exact.id
   }
 
   // Prefix match
   const candidates = db
-    .query('SELECT id FROM threads WHERE substr(id, 1, ?) = ? ORDER BY updated_at DESC, created_at DESC, id DESC')
+    .query(
+      'SELECT id FROM threads WHERE substr(id, 1, ?) = ? ORDER BY updated_at DESC, created_at DESC, id DESC',
+    )
     .all(idOrPrefix.length, idOrPrefix) as { id: string }[]
 
   if (candidates.length === 0) {
@@ -170,7 +179,7 @@ export function getThread(db: Database, idOrPrefix: string, cwd?: string): Threa
         (SELECT COUNT(*) FROM checkpoints c WHERE c.thread_id = t.id) AS checkpoint_count
       FROM threads t
       WHERE t.id = ?
-      `
+      `,
     )
     .get(id) as ThreadRow | null
 
@@ -186,7 +195,7 @@ export function listThreads(
     cwd?: string
     all?: boolean
     limit?: number
-  } = {}
+  } = {},
 ): ThreadRecord[] {
   const limit = options.limit ?? 20
   let rows: ThreadRow[]
@@ -200,7 +209,7 @@ export function listThreads(
         FROM threads t
         ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC
         LIMIT ?
-        `
+        `,
       )
       .all(limit) as ThreadRow[]
   } else {
@@ -220,7 +229,7 @@ export function listThreads(
         WHERE t.cwd = ?
         ORDER BY t.updated_at DESC, t.created_at DESC, t.id DESC
         LIMIT ?
-        `
+        `,
       )
       .all(targetCwd, limit) as ThreadRow[]
   }
@@ -228,11 +237,18 @@ export function listThreads(
   return rows.map(mapRow)
 }
 
-export function renameThread(db: Database, idOrPrefix: string, newTitle: string, cwd?: string): ThreadRecord {
+export function renameThread(
+  db: Database,
+  idOrPrefix: string,
+  newTitle: string,
+  cwd?: string,
+): ThreadRecord {
   const id = resolveThreadId(db, idOrPrefix, cwd)
   const cleaned = newTitle.trim().replace(/\s+/g, ' ')
   if (cleaned.length === 0 || cleaned.length > 120) {
-    throw new Error(`Invalid title length (${cleaned.length} characters). Must be between 1 and 120 characters.`)
+    throw new Error(
+      `Invalid title length (${cleaned.length} characters). Must be between 1 and 120 characters.`,
+    )
   }
 
   db.run('UPDATE threads SET title = ? WHERE id = ?', [cleaned, id])
@@ -246,12 +262,16 @@ export function deleteThread(db: Database, idOrPrefix: string, cwd?: string): vo
   writeTx(db, () => {
     const row = db
       .query('SELECT lock_pid, lock_at, lock_host FROM threads WHERE id = ?')
-      .get(id) as { lock_pid: number | null; lock_at: number | null; lock_host: string | null } | null
+      .get(id) as {
+      lock_pid: number | null
+      lock_at: number | null
+      lock_host: string | null
+    } | null
 
     if (row?.lock_pid !== null && row?.lock_pid !== undefined) {
       const isSameHost = row.lock_host === null || row.lock_host === host
       const isAlive = isSameHost ? pidAlive(row.lock_pid) : true
-      const isStale = isSameHost && row.lock_at !== null && (Date.now() - row.lock_at > 30_000)
+      const isStale = isSameHost && row.lock_at !== null && Date.now() - row.lock_at > 30_000
       if (isAlive && !isStale) {
         throw new Error(`Cannot delete thread ${id}: active lease held by pid ${row.lock_pid}`)
       }
@@ -267,7 +287,7 @@ export function deleteThread(db: Database, idOrPrefix: string, cwd?: string): vo
         UNION
         SELECT after_hash FROM checkpoint_files WHERE after_hash IS NOT NULL
       )
-      `
+      `,
     )
   })
 }
@@ -296,17 +316,23 @@ export function appendMessage(db: Database, threadId: string, message: ModelMess
           updated_at = ?
       WHERE id = ?
       `,
-      [isUser ? 1 : 0, Date.now(), threadId]
+      [isUser ? 1 : 0, Date.now(), threadId],
     )
   })
 }
 
-export function appendMessages(db: Database, threadId: string, messages: readonly ModelMessage[]): void {
+export function appendMessages(
+  db: Database,
+  threadId: string,
+  messages: readonly ModelMessage[],
+): void {
   if (messages.length === 0) return
 
   writeTx(db, () => {
     let nextSeq = (
-      db.query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE thread_id = ?').get(threadId) as {
+      db
+        .query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE thread_id = ?')
+        .get(threadId) as {
         max_seq: number
       }
     ).max_seq
@@ -327,7 +353,7 @@ export function appendMessages(db: Database, threadId: string, messages: readonl
           updated_at = ?
       WHERE id = ?
       `,
-      [messages.length, Date.now(), threadId]
+      [messages.length, Date.now(), threadId],
     )
   })
 }
@@ -351,13 +377,15 @@ export function recordStepMessages(
   threadId: string,
   messages: readonly ModelMessage[],
   stepsIncrement: number,
-  usage?: UsageSummary
+  usage?: UsageSummary,
 ): void {
   if (messages.length === 0 && stepsIncrement === 0) return
 
   writeTx(db, () => {
     let nextSeq = (
-      db.query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE thread_id = ?').get(threadId) as {
+      db
+        .query('SELECT COALESCE(MAX(seq), 0) AS max_seq FROM messages WHERE thread_id = ?')
+        .get(threadId) as {
         max_seq: number
       }
     ).max_seq
@@ -388,7 +416,7 @@ export function recordStepMessages(
         usage?.outputTokens ?? 0,
         Date.now(),
         threadId,
-      ]
+      ],
     )
   })
 }

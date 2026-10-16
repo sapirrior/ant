@@ -9,7 +9,13 @@ import {
   type ThreadRecord,
 } from '../store/threads.ts'
 import { createInterface } from 'node:readline/promises'
-import { formatTimeAgo, formatTokens, padEndVisible, padStartVisible, visibleWidth } from '../utils/format.ts'
+import {
+  formatTimeAgo,
+  formatTokens,
+  padEndVisible,
+  padStartVisible,
+  visibleWidth,
+} from '../utils/format.ts'
 import { parseIntStrict } from '../utils/number.ts'
 import { pidAlive } from '../utils/process.ts'
 import { displayPath } from '../output/paths.ts'
@@ -206,7 +212,9 @@ export function registerThreadsCommand(program: Command): void {
 
           const rl = createInterface({ input: process.stdin, output: process.stdout })
           try {
-            const answer = await rl.question(`Delete thread ${thread.id} ("${thread.title}")? [y/N] `)
+            const answer = await rl.question(
+              `Delete thread ${thread.id} ("${thread.title}")? [y/N] `,
+            )
             if (answer.trim().toLowerCase() !== 'y' && answer.trim().toLowerCase() !== 'yes') {
               process.stdout.write('Aborted.\n')
               return

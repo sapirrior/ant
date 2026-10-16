@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'bun:test'
-import {
-  formatToolOutcome,
-  formatToolTarget,
-  StderrLogger,
-} from './log.ts'
+import { formatToolOutcome, formatToolTarget, StderrLogger } from './log.ts'
 
 describe('output/log tool formatting and logger', () => {
   it('formats tool targets accurately and compactly on one line', () => {
-    expect(formatToolTarget('ReadFile', { path: 'src/index.ts', offset: 10, limit: 20 })).toBe('src/index.ts:10+20')
+    expect(formatToolTarget('ReadFile', { path: 'src/index.ts', offset: 10, limit: 20 })).toBe(
+      'src/index.ts:10+20',
+    )
     expect(formatToolTarget('ReadFile', { path: 'src/index.ts' })).toBe('src/index.ts')
-    expect(formatToolTarget('Grep', { pattern: 'function\\s+foo', path: 'src' })).toBe('/function\\s+foo/ src')
+    expect(formatToolTarget('Grep', { pattern: 'function\\s+foo', path: 'src' })).toBe(
+      '/function\\s+foo/ src',
+    )
     expect(formatToolTarget('Bash', { command: 'echo hello\nworld' })).toBe('echo hello world')
     expect(formatToolTarget('TaskManager', { action: 'stop', taskId: 't1' })).toBe('stop t1')
-    expect(formatToolTarget('McpTool', { action: 'call', server: 'git', tool: 'log' })).toBe('git/log')
+    expect(formatToolTarget('McpTool', { action: 'call', server: 'git', tool: 'log' })).toBe(
+      'git/log',
+    )
     expect(formatToolTarget('Unknown', null)).toBe('')
   })
 
@@ -32,7 +34,9 @@ describe('output/log tool formatting and logger', () => {
     })
 
     // Bash statuses and exit codes
-    expect(formatToolOutcome('Bash', { ok: true, output: { status: 'running', taskId: 't2' } })).toEqual({
+    expect(
+      formatToolOutcome('Bash', { ok: true, output: { status: 'running', taskId: 't2' } }),
+    ).toEqual({
       summary: 'running in background as t2',
       severity: 'success',
     })
@@ -40,11 +44,15 @@ describe('output/log tool formatting and logger', () => {
       summary: 'timed out',
       severity: 'warning',
     })
-    expect(formatToolOutcome('Bash', { ok: true, output: { status: 'exited', exitCode: 0 } })).toEqual({
+    expect(
+      formatToolOutcome('Bash', { ok: true, output: { status: 'exited', exitCode: 0 } }),
+    ).toEqual({
       summary: 'exit 0',
       severity: 'success',
     })
-    expect(formatToolOutcome('Bash', { ok: true, output: { status: 'exited', exitCode: 1 } })).toEqual({
+    expect(
+      formatToolOutcome('Bash', { ok: true, output: { status: 'exited', exitCode: 1 } }),
+    ).toEqual({
       summary: 'exit 1',
       severity: 'warning',
     })

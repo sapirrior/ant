@@ -43,7 +43,10 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 
 export function resolveLanguage(rawLang?: string): string | undefined {
   if (!rawLang) return undefined
-  const clean = rawLang.trim().split(/[\s:{]/)[0]?.toLowerCase()
+  const clean = rawLang
+    .trim()
+    .split(/[\s:{]/)[0]
+    ?.toLowerCase()
   if (!clean) return undefined
   const aliased = LANGUAGE_ALIASES[clean] ?? clean
   if (supportsLanguage(aliased)) {
@@ -168,7 +171,7 @@ export function highlightCode(
   code: string,
   rawLang: string | undefined,
   fmt: ReturnType<typeof createColorFormatter>,
-  theme?: Theme
+  theme?: Theme,
 ): string {
   if (fmt.level === 0 || !code) {
     return code
@@ -278,20 +281,20 @@ function formatToken(
   listDepth = 0,
   orderedListNumber: number | null = null,
   parent: Token | null = null,
-  maxWidth: number = 0
+  maxWidth: number = 0,
 ): string {
   switch (token.type) {
     case 'blockquote': {
       const inner = (token.tokens ?? [])
-        .map((t: Token) => formatToken(t, fmt, 0, null, null, maxWidth > 2 ? maxWidth - 2 : maxWidth))
+        .map((t: Token) =>
+          formatToken(t, fmt, 0, null, null, maxWidth > 2 ? maxWidth - 2 : maxWidth),
+        )
         .join('')
       const bar = fmt.muted('│')
       return (
         inner
           .split(EOL)
-          .map((line: string) =>
-            stripAnsi(line).trim() ? `${bar} ${fmt.italic(line)}` : line
-          )
+          .map((line: string) => (stripAnsi(line).trim() ? `${bar} ${fmt.italic(line)}` : line))
           .join(EOL) + EOL
       )
     }
@@ -307,17 +310,13 @@ function formatToken(
 
     case 'em': {
       return fmt.italic(
-        (token.tokens ?? [])
-          .map((t: Token) => formatToken(t, fmt, 0, null, parent))
-          .join('')
+        (token.tokens ?? []).map((t: Token) => formatToken(t, fmt, 0, null, parent)).join(''),
       )
     }
 
     case 'strong': {
       return fmt.bold(
-        (token.tokens ?? [])
-          .map((t: Token) => formatToken(t, fmt, 0, null, parent))
-          .join('')
+        (token.tokens ?? []).map((t: Token) => formatToken(t, fmt, 0, null, parent)).join(''),
       )
     }
 
@@ -354,20 +353,18 @@ function formatToken(
     }
 
     case 'list': {
-      return (
-        token.items
-          .map((item: Tokens.ListItem, index: number) =>
-            formatToken(
-              item,
-              fmt,
-              listDepth,
-              token.ordered ? (token.start ?? 1) + index : null,
-              token,
-              maxWidth
-            )
-          )
-          .join('')
-      )
+      return token.items
+        .map((item: Tokens.ListItem, index: number) =>
+          formatToken(
+            item,
+            fmt,
+            listDepth,
+            token.ordered ? (token.start ?? 1) + index : null,
+            token,
+            maxWidth,
+          ),
+        )
+        .join('')
     }
 
     case 'list_item': {
@@ -376,7 +373,7 @@ function formatToken(
       return (token.tokens ?? [])
         .map(
           (t: Token) =>
-            `${'  '.repeat(listDepth)}${formatToken(t, fmt, listDepth + 1, orderedListNumber, token, remainingWidth)}`
+            `${'  '.repeat(listDepth)}${formatToken(t, fmt, listDepth + 1, orderedListNumber, token, remainingWidth)}`,
         )
         .join('')
     }
@@ -417,18 +414,20 @@ function formatToken(
 
       function getDisplayText(tokens: Token[] | undefined): string {
         return stripAnsi(
-          tokens?.map((t: Token) => formatToken(t, fmt, 0, null, null)).join('') ?? ''
+          tokens?.map((t: Token) => formatToken(t, fmt, 0, null, null)).join('') ?? '',
         )
       }
 
-      const columnWidths = tableToken.header.map((header: Tokens.Table['header'][number], index: number) => {
-        let maxColWidth = visibleWidth(getDisplayText(header.tokens))
-        for (const row of tableToken.rows) {
-          const cellLength = visibleWidth(getDisplayText(row[index]?.tokens))
-          maxColWidth = Math.max(maxColWidth, cellLength)
-        }
-        return Math.max(maxColWidth, 3)
-      })
+      const columnWidths = tableToken.header.map(
+        (header: Tokens.Table['header'][number], index: number) => {
+          let maxColWidth = visibleWidth(getDisplayText(header.tokens))
+          for (const row of tableToken.rows) {
+            const cellLength = visibleWidth(getDisplayText(row[index]?.tokens))
+            maxColWidth = Math.max(maxColWidth, cellLength)
+          }
+          return Math.max(maxColWidth, 3)
+        },
+      )
 
       let tableOutput = '| '
       tableToken.header.forEach((header: Tokens.Table['header'][number], index: number) => {
@@ -569,9 +568,8 @@ export class StreamingMarkdownRenderer {
     if (this.insideCodeBlock) {
       let rendered: string
       if (this.fmt.level > 0) {
-        const highlighted = line.length > 0
-          ? highlightCode(line, this.codeLang, this.fmt, this.highlightTheme)
-          : line
+        const highlighted =
+          line.length > 0 ? highlightCode(line, this.codeLang, this.fmt, this.highlightTheme) : line
         rendered = `${this.fmt.muted(this.sym.rail)} ${highlighted}`
       } else {
         rendered = line
@@ -665,7 +663,11 @@ export class StreamingMarkdownRenderer {
       const rail = this.fmt.muted(this.sym.rail)
       const quotePrefix = `${rail} `
       if (this.columns > 0 && visibleWidth(rendered) + visibleWidth(quotePrefix) > this.columns) {
-        return wrapParagraph(`${quotePrefix}${this.fmt.italic(rendered)}`, this.columns, quotePrefix)
+        return wrapParagraph(
+          `${quotePrefix}${this.fmt.italic(rendered)}`,
+          this.columns,
+          quotePrefix,
+        )
       }
       return `${quotePrefix}${this.fmt.italic(rendered)}`
     }

@@ -13,12 +13,7 @@ export const TOOL_NAMES = [
 ] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
 
-export const PERMISSION_MODES = [
-  'default',
-  'plan',
-  'acceptEdits',
-  'bypassPermissions',
-] as const
+export const PERMISSION_MODES = ['default', 'plan', 'acceptEdits', 'bypassPermissions'] as const
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
 
 export const OUTPUT_FORMATS = ['text', 'md', 'json', 'stream-json'] as const

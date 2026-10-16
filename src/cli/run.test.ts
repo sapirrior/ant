@@ -91,7 +91,7 @@ describe('CLI run command contract', () => {
     } catch {}
 
     expect(process.exitCode).toBe(2)
-    expect(stderrBuf).toContain('Permission mode "dontAsk" is not supported')
+    expect(stderrBuf).toContain('Invalid permission-mode: "dontAsk"')
   })
 
   it('rejects invalid permission-mode', async () => {

@@ -139,7 +139,8 @@ export class Engine {
         return config.prompt || config.stdinInput || undefined
       }
 
-      const existingThreadId = config.resumeThreadId ?? (config.continueLatest ? 'latest' : undefined)
+      const existingThreadId =
+        config.resumeThreadId ?? (config.continueLatest ? 'latest' : undefined)
       if (existingThreadId) {
         const loaded = loadExisting(existingThreadId)
         thread = loaded.t
@@ -169,7 +170,9 @@ export class Engine {
       } else {
         const userContent = buildUserContent()
         if (!userContent) {
-          throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
+          throw new Error(
+            'No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.',
+          )
         }
 
         if (isPersistent && db) {
@@ -260,7 +263,11 @@ export class Engine {
         agentContext: {
           tasks,
           mcpManager,
-          onStepPersist: (stepMessages: ModelMessage[], usage?: UsageSummary, stepsIncrement = 1) => {
+          onStepPersist: (
+            stepMessages: ModelMessage[],
+            usage?: UsageSummary,
+            stepsIncrement = 1,
+          ) => {
             if (db) {
               recordStepMessages(db, thread.id, stepMessages, stepsIncrement, usage)
             }
@@ -290,9 +297,15 @@ export class Engine {
                 const { summary, severity } = formatToolOutcome(
                   event.toolName,
                   event.output,
-                  event.isError
+                  event.isError,
                 )
-                logger.toolEnd(summary, event.durationMs, Boolean(event.isError), event.callId, severity)
+                logger.toolEnd(
+                  summary,
+                  event.durationMs,
+                  Boolean(event.isError),
+                  event.callId,
+                  severity,
+                )
               })
               break
             }
@@ -321,12 +334,10 @@ export class Engine {
       // Record last_status and last_exit_code in threads table
       if (db) {
         try {
-          db.run('UPDATE threads SET last_status = ?, last_exit_code = ?, updated_at = ? WHERE id = ?', [
-            outcome.status,
-            outcome.exitCode,
-            Date.now(),
-            thread.id,
-          ])
+          db.run(
+            'UPDATE threads SET last_status = ?, last_exit_code = ?, updated_at = ? WHERE id = ?',
+            [outcome.status, outcome.exitCode, Date.now(), thread.id],
+          )
         } catch {
           // Suppress failure here so it doesn't mask exit code
         }

@@ -13,9 +13,7 @@ import { notice } from '../output/notice.ts'
 import { padEndVisible } from '../utils/format.ts'
 
 export function registerMcpCommand(program: Command): void {
-  const mcpCmd = program
-    .command('mcp')
-    .description('Manage Model Context Protocol (MCP) servers')
+  const mcpCmd = program.command('mcp').description('Manage Model Context Protocol (MCP) servers')
 
   // ant mcp list
   mcpCmd
@@ -42,9 +40,7 @@ export function registerMcpCommand(program: Command): void {
       const projectCount = servers.filter((s) => s.scope === 'project').length
       const globalCount = servers.filter((s) => s.scope === 'global').length
 
-      process.stdout.write(
-        `\nMCP Servers (${projectCount} project, ${globalCount} global):\n\n`
-      )
+      process.stdout.write(`\nMCP Servers (${projectCount} project, ${globalCount} global):\n\n`)
 
       // Header
       const colName = 'NAME'.padEnd(16)
@@ -54,7 +50,7 @@ export function registerMcpCommand(program: Command): void {
       const colTarget = 'TARGET'
 
       process.stdout.write(
-        `${fmt.bold(colName)} ${fmt.bold(colTransport)} ${fmt.bold(colScope)} ${fmt.bold(colStatus)} ${fmt.bold(colTarget)}\n`
+        `${fmt.bold(colName)} ${fmt.bold(colTransport)} ${fmt.bold(colScope)} ${fmt.bold(colStatus)} ${fmt.bold(colTarget)}\n`,
       )
 
       for (const s of servers) {
@@ -137,8 +133,11 @@ export function registerMcpCommand(program: Command): void {
         }
 
         await addMcpServer(scope, name, serverConfig, process.cwd())
-        const targetPath = scope === 'global' ? getGlobalMcpConfigPath() : getProjectMcpConfigPath(process.cwd())
-        process.stdout.write(`Added MCP server "${name}" to ${scope} configuration (${targetPath})\n`)
+        const targetPath =
+          scope === 'global' ? getGlobalMcpConfigPath() : getProjectMcpConfigPath(process.cwd())
+        process.stdout.write(
+          `Added MCP server "${name}" to ${scope} configuration (${targetPath})\n`,
+        )
         process.exitCode = 0
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)

@@ -79,6 +79,8 @@ describe('modular provider adapters', () => {
 
   it('custom adapter requires ANT_CUSTOM_BASE_URL', () => {
     expect(() => customAdapter.validateAuth({})).toThrow(/ANT_CUSTOM_BASE_URL/)
-    expect(() => customAdapter.validateAuth({ ANT_CUSTOM_BASE_URL: 'http://localhost:8000/v1' })).not.toThrow()
+    expect(() =>
+      customAdapter.validateAuth({ ANT_CUSTOM_BASE_URL: 'http://localhost:8000/v1' }),
+    ).not.toThrow()
   })
 })

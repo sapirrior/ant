@@ -2,11 +2,7 @@ import type { ModelOutcome, OutputFormat, RunEvent } from '../core/types.ts'
 import type { ColorLevel, ThemeMode } from './color.ts'
 import pkg from '../../package.json' with { type: 'json' }
 import { StreamingMarkdownRenderer } from './markdown.ts'
-import {
-  ResultSchema,
-  StreamResultEventSchema,
-  type ResultEnvelope,
-} from './schema.ts'
+import { ResultSchema, StreamResultEventSchema, type ResultEnvelope } from './schema.ts'
 
 export interface OutputSinkOptions {
   format: OutputFormat
@@ -26,7 +22,10 @@ export interface OutputSink {
   ensureLineStart?(): void
 }
 
-function truncatePayload(payload: unknown, maxChars = 65536): { data: unknown; truncated?: boolean; originalSize?: number } {
+function truncatePayload(
+  payload: unknown,
+  maxChars = 65536,
+): { data: unknown; truncated?: boolean; originalSize?: number } {
   if (payload === undefined || payload === null) {
     return { data: payload }
   }
@@ -58,7 +57,7 @@ function truncatePayload(payload: unknown, maxChars = 65536): { data: unknown; t
 
 export function buildResultEnvelope(
   outcome: ModelOutcome,
-  meta?: Partial<OutputSinkOptions>
+  meta?: Partial<OutputSinkOptions>,
 ): ResultEnvelope {
   const durationMs = meta?.startTime ? Date.now() - meta.startTime : 0
   const isError = outcome.status !== 'completed'

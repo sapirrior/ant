@@ -1,7 +1,7 @@
 export function parseIntStrict(
   name: string,
   raw: string,
-  options?: { min?: number; max?: number }
+  options?: { min?: number; max?: number },
 ): number {
   if (!/^\d+$/.test(raw)) {
     throw new Error(`Invalid ${name}: "${raw}". Must be a non-negative integer.`)

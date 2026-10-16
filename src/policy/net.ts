@@ -1,7 +1,10 @@
 import dns from 'node:dns/promises'
 
 export function isPrivateAddress(ip: string): boolean {
-  const clean = ip.replace(/^\[|\]$/g, '').trim().toLowerCase()
+  const clean = ip
+    .replace(/^\[|\]$/g, '')
+    .trim()
+    .toLowerCase()
 
   // IPv4 mapped IPv6 e.g. ::ffff:127.0.0.1
   if (clean.startsWith('::ffff:')) {
@@ -23,14 +26,18 @@ export function isPrivateAddress(ip: string): boolean {
 
   // IPv6 check
   if (clean === '::' || clean === '::1') return true
-  if (/^f[cd][0-9a-f]{2}:/i.test(clean) || clean.startsWith('fc') || clean.startsWith('fd')) return true
+  if (/^f[cd][0-9a-f]{2}:/i.test(clean) || clean.startsWith('fc') || clean.startsWith('fd'))
+    return true
   if (/^fe[89ab][0-9a-f]:/i.test(clean) || clean.startsWith('fe80:')) return true
 
   return false
 }
 
 export async function validatePublicHost(hostname: string): Promise<void> {
-  const host = hostname.replace(/^\[|\]$/g, '').trim().toLowerCase()
+  const host = hostname
+    .replace(/^\[|\]$/g, '')
+    .trim()
+    .toLowerCase()
   if (host === 'localhost' || isPrivateAddress(host)) {
     throw new Error(`Access to local or private network address "${hostname}" is prohibited.`)
   }
@@ -39,7 +46,9 @@ export async function validatePublicHost(hostname: string): Promise<void> {
     const records = await dns.lookup(host, { all: true })
     for (const record of records) {
       if (isPrivateAddress(record.address)) {
-        throw new Error(`Access to local or private network address "${record.address}" (resolved from ${hostname}) is prohibited.`)
+        throw new Error(
+          `Access to local or private network address "${record.address}" (resolved from ${hostname}) is prohibited.`,
+        )
       }
     }
   } catch (err: any) {

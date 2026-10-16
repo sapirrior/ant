@@ -96,7 +96,9 @@ export function createLifecycle(options?: {
   const onUncaughtException = (err: unknown) => {
     if (isDisposed) return
     options?.onError?.(err)
-    notice.error(`uncaught exception: ${err instanceof Error ? err.stack ?? err.message : String(err)}`)
+    notice.error(
+      `uncaught exception: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+    )
     runEmergencyCleanup()
     drainAndExit(5)
   }
@@ -104,7 +106,9 @@ export function createLifecycle(options?: {
   const onUnhandledRejection = (reason: unknown) => {
     if (isDisposed) return
     options?.onError?.(reason)
-    notice.error(`unhandled rejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`)
+    notice.error(
+      `unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`,
+    )
     runEmergencyCleanup()
     drainAndExit(5)
   }

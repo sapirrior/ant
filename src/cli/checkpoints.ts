@@ -20,7 +20,11 @@ function getRealCwd(): string {
   }
 }
 
-function renderCheckpointsList(threadId: string, threadTitle: string, checkpoints: readonly CheckpointRecord[]): string {
+function renderCheckpointsList(
+  threadId: string,
+  threadTitle: string,
+  checkpoints: readonly CheckpointRecord[],
+): string {
   if (checkpoints.length === 0) {
     return `Thread ${threadId} — ${threadTitle}\nNo checkpoints recorded for this thread.\n`
   }
@@ -31,9 +35,7 @@ function renderCheckpointsList(threadId: string, threadTitle: string, checkpoint
   for (const cp of checkpoints) {
     const when = padEndVisible(formatTimeAgo(cp.createdAt), 8)
     const tool = padEndVisible(cp.tool, 11)
-    const filesSummary = cp.files
-      .map((f) => `${f.status ?? '~'} ${f.path}`)
-      .join(', ')
+    const filesSummary = cp.files.map((f) => `${f.status ?? '~'} ${f.path}`).join(', ')
 
     out += `  ${padEndVisible(String(cp.seq), 2)} ${when} ${tool} ${filesSummary}\n`
   }
@@ -41,7 +43,9 @@ function renderCheckpointsList(threadId: string, threadTitle: string, checkpoint
 }
 
 export function registerCheckpointsCommand(program: Command): void {
-  const checkpoints = program.command('checkpoints').description('Manage file snapshots and rewinds')
+  const checkpoints = program
+    .command('checkpoints')
+    .description('Manage file snapshots and rewinds')
 
   checkpoints
     .command('list', { isDefault: true })
@@ -155,14 +159,16 @@ export function registerCheckpointsCommand(program: Command): void {
           })
 
           if (res.dryRun) {
-            process.stdout.write(`Dry run: restoration plan for checkpoint #${seq} (Thread ${thread.id}):\n`)
+            process.stdout.write(
+              `Dry run: restoration plan for checkpoint #${seq} (Thread ${thread.id}):\n`,
+            )
             for (const item of res.plan) {
               const statusStr = item.isConflict ? ' [CONFLICT]' : ''
               process.stdout.write(`  ${item.action.toUpperCase()} ${item.path}${statusStr}\n`)
             }
           } else {
             notice.info(
-              `restored workspace to before checkpoint #${seq} (new checkpoint #${res.restoredSeq} created)`
+              `restored workspace to before checkpoint #${seq} (new checkpoint #${res.restoredSeq} created)`,
             )
             for (const item of res.plan) {
               process.stdout.write(`  ${item.action.toUpperCase()} ${item.path}\n`)

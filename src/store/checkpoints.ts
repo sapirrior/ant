@@ -28,7 +28,10 @@ export interface CheckpointInputFile {
   after: FileSnapshot | null
 }
 
-export function computeFileStatus(beforeHash: string | null, afterHash: string | null): '+' | '~' | '-' {
+export function computeFileStatus(
+  beforeHash: string | null,
+  afterHash: string | null,
+): '+' | '~' | '-' {
   if (beforeHash === null && afterHash !== null) return '+'
   if (beforeHash !== null && afterHash === null) return '-'
   return '~'
@@ -39,7 +42,7 @@ export function recordCheckpoint(
   threadId: string,
   tool: string,
   toolCallId: string | undefined,
-  files: CheckpointInputFile[]
+  files: CheckpointInputFile[],
 ): number {
   if (files.length === 0) {
     return 0
@@ -73,7 +76,7 @@ export function recordCheckpoint(
 
     db.run(
       'INSERT INTO checkpoints (thread_id, seq, created_at, tool, tool_call_id) VALUES (?, ?, ?, ?, ?)',
-      [threadId, assignedSeq, Date.now(), tool, toolCallId ?? null]
+      [threadId, assignedSeq, Date.now(), tool, toolCallId ?? null],
     )
 
     const cpId = (db.query('SELECT last_insert_rowid() AS id').get() as { id: number }).id
@@ -88,7 +91,7 @@ export function recordCheckpoint(
           f.after?.hash ?? null,
           f.after?.mode ?? f.before?.mode ?? null,
           f.before?.mode ?? null,
-        ]
+        ],
       )
     }
   })
@@ -110,7 +113,9 @@ export function listCheckpoints(db: Database, threadId: string): CheckpointRecor
 
   return cpRows.map((cp) => {
     const fileRows = db
-      .query('SELECT path, before_hash, after_hash, mode FROM checkpoint_files WHERE checkpoint_id = ? ORDER BY path ASC')
+      .query(
+        'SELECT path, before_hash, after_hash, mode FROM checkpoint_files WHERE checkpoint_id = ? ORDER BY path ASC',
+      )
       .all(cp.id) as {
       path: string
       before_hash: string | null
@@ -155,7 +160,9 @@ export function getCheckpoint(db: Database, threadId: string, seq: number): Chec
   }
 
   const fileRows = db
-    .query('SELECT path, before_hash, after_hash, mode FROM checkpoint_files WHERE checkpoint_id = ? ORDER BY path ASC')
+    .query(
+      'SELECT path, before_hash, after_hash, mode FROM checkpoint_files WHERE checkpoint_id = ? ORDER BY path ASC',
+    )
     .all(cp.id) as {
     path: string
     before_hash: string | null
@@ -206,7 +213,7 @@ export function restoreCheckpoint(
     cwd: string
     dryRun?: boolean
     force?: boolean
-  }
+  },
 ): RestoreResult {
   // 1. Verify checkpoint exists
   getCheckpoint(db, threadId, targetSeq)
@@ -220,7 +227,7 @@ export function restoreCheckpoint(
       JOIN checkpoint_files cf ON c.id = cf.checkpoint_id
       WHERE c.thread_id = ? AND c.seq >= ?
       ORDER BY c.seq ASC
-      `
+      `,
     )
     .all(threadId, targetSeq) as {
     seq: number
@@ -301,20 +308,20 @@ export function restoreCheckpoint(
     const conflictLines = conflicts
       .map(
         (c) =>
-          `  ${c.path} (expected ${c.expectedHash?.slice(0, 8) ?? 'absent'}, current on disk ${c.currentHash?.slice(0, 8) ?? 'absent'})`
+          `  ${c.path} (expected ${c.expectedHash?.slice(0, 8) ?? 'absent'}, current on disk ${c.currentHash?.slice(0, 8) ?? 'absent'})`,
       )
       .join('\n')
     throw new Error(
-      `Cannot restore to checkpoint #${targetSeq}: conflicting modifications detected outside ant on:\n${conflictLines}\nUse --force to overwrite external modifications.`
+      `Cannot restore to checkpoint #${targetSeq}: conflicting modifications detected outside ant on:\n${conflictLines}\nUse --force to overwrite external modifications.`,
     )
   }
 
   // 6. Pre-validate all target blobs exist BEFORE mutating any files
   for (const item of plan) {
     if (item.action !== 'delete' && item.targetHash) {
-      const blobRow = db
-        .query('SELECT hash FROM blobs WHERE hash = ?')
-        .get(item.targetHash) as { hash: string } | null
+      const blobRow = db.query('SELECT hash FROM blobs WHERE hash = ?').get(item.targetHash) as {
+        hash: string
+      } | null
       if (!blobRow) {
         throw new Error(`Corrupted blob store: blob with hash ${item.targetHash} not found`)
       }
@@ -341,9 +348,9 @@ export function restoreCheckpoint(
         })
       } else {
         // Fetch blob
-        const blobRow = db
-          .query('SELECT data FROM blobs WHERE hash = ?')
-          .get(item.targetHash!) as { data: Buffer } | null
+        const blobRow = db.query('SELECT data FROM blobs WHERE hash = ?').get(item.targetHash!) as {
+          data: Buffer
+        } | null
 
         if (!blobRow) {
           throw new Error(`Corrupted blob store: blob with hash ${item.targetHash} not found`)

@@ -25,7 +25,7 @@ export function parseModelString(rawModel: string): { provider: string; modelId:
   const slashIdx = rawModel.indexOf('/')
   if (slashIdx <= 0 || slashIdx === rawModel.length - 1) {
     throw new Error(
-      `Invalid model format: "${rawModel}". Expected "provider/model-id" (e.g. "anthropic/claude-3-7-sonnet-20250219").`
+      `Invalid model format: "${rawModel}". Expected "provider/model-id" (e.g. "anthropic/claude-3-7-sonnet-20250219").`,
     )
   }
 
@@ -35,19 +35,29 @@ export function parseModelString(rawModel: string): { provider: string; modelId:
   return { provider, modelId }
 }
 
-export function resolveLanguageModel(
+export function validateModelConfig(
   rawModel: string,
-  env: NodeJS.ProcessEnv = process.env
-): ModelResolution {
+  env: NodeJS.ProcessEnv = process.env,
+): { provider: string; modelId: string; adapter: ProviderAdapter } {
   const { provider, modelId } = parseModelString(rawModel)
   const adapter = PROVIDER_ADAPTERS[provider]
 
   if (!adapter) {
     const supportedList = Object.keys(PROVIDER_ADAPTERS).join(', ')
-    throw new Error(`Unsupported provider "${provider}". Supported: ${supportedList}. Format: "provider/model-id"`)
+    throw new Error(
+      `Unsupported provider "${provider}". Supported: ${supportedList}. Format: "provider/model-id"`,
+    )
   }
 
   adapter.validateAuth(env)
+  return { provider, modelId, adapter }
+}
+
+export function resolveLanguageModel(
+  rawModel: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ModelResolution {
+  const { provider, modelId, adapter } = validateModelConfig(rawModel, env)
   const model = adapter.createModel(modelId, env)
 
   return { provider, modelId, model, adapter }

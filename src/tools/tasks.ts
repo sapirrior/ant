@@ -125,7 +125,8 @@ export class TaskManagerRegistry {
   list(): TaskSummary[] {
     const out: TaskSummary[] = []
     for (const task of this.tasks.values()) {
-      const commandPreview = task.command.length > 100 ? `${task.command.slice(0, 97)}...` : task.command
+      const commandPreview =
+        task.command.length > 100 ? `${task.command.slice(0, 97)}...` : task.command
       const unreadChars = Math.max(0, task.buf.length - task.readCursor)
       out.push({
         id: task.id,
@@ -141,7 +142,7 @@ export class TaskManagerRegistry {
 
   async read(
     id: string,
-    waitMs = 0
+    waitMs = 0,
   ): Promise<{
     output: string
     moreAvailable: boolean
@@ -184,7 +185,15 @@ export class TaskManagerRegistry {
     if (!task) {
       throw new Error(`Task not found: "${id}"`)
     }
-    if (task.exited || task.status !== 'running' || task.stdinClosed || !task.child.stdin || !task.child.stdin.writable || task.child.stdin.destroyed || task.child.stdin.writableEnded) {
+    if (
+      task.exited ||
+      task.status !== 'running' ||
+      task.stdinClosed ||
+      !task.child.stdin ||
+      !task.child.stdin.writable ||
+      task.child.stdin.destroyed ||
+      task.child.stdin.writableEnded
+    ) {
       throw new Error(`Cannot write to task "${id}": stdin is not writable or process has exited`)
     }
 
@@ -204,7 +213,12 @@ export class TaskManagerRegistry {
     if (!task) {
       throw new Error(`Task not found: "${id}"`)
     }
-    if (task.exited || !task.child.pid || task.child.exitCode !== null || task.child.signalCode !== null) {
+    if (
+      task.exited ||
+      !task.child.pid ||
+      task.child.exitCode !== null ||
+      task.child.signalCode !== null
+    ) {
       return
     }
 
@@ -224,7 +238,12 @@ export class TaskManagerRegistry {
     if (signal === 'SIGTERM') {
       if (task.escalationTimer) clearTimeout(task.escalationTimer)
       task.escalationTimer = setTimeout(() => {
-        if (!task.exited && task.child.pid && task.child.exitCode === null && task.child.signalCode === null) {
+        if (
+          !task.exited &&
+          task.child.pid &&
+          task.child.exitCode === null &&
+          task.child.signalCode === null
+        ) {
           try {
             process.kill(-task.child.pid, 'SIGKILL')
           } catch {
@@ -241,7 +260,12 @@ export class TaskManagerRegistry {
   async shutdown(graceMs = 3000): Promise<void> {
     const pendingTasks: ShellTask[] = []
     for (const task of this.tasks.values()) {
-      if (!task.exited && task.child.pid && task.child.exitCode === null && task.child.signalCode === null) {
+      if (
+        !task.exited &&
+        task.child.pid &&
+        task.child.exitCode === null &&
+        task.child.signalCode === null
+      ) {
         pendingTasks.push(task)
         this.stop(task.id, 'SIGTERM')
       }
@@ -272,7 +296,12 @@ export class TaskManagerRegistry {
 
   killAll(): void {
     for (const task of this.tasks.values()) {
-      if (!task.exited && task.child.pid && task.child.exitCode === null && task.child.signalCode === null) {
+      if (
+        !task.exited &&
+        task.child.pid &&
+        task.child.exitCode === null &&
+        task.child.signalCode === null
+      ) {
         task.status = 'killed'
         if (task.escalationTimer) {
           clearTimeout(task.escalationTimer)

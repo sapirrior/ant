@@ -28,7 +28,9 @@ export function createDeleteFileTool(context: ToolExecutionContext) {
 
         const stats = statSync(fullPath)
         if (stats.isDirectory()) {
-          throw new Error(`Cannot delete directory "${path}" using DeleteFile. DeleteFile only deletes individual files.`)
+          throw new Error(
+            `Cannot delete directory "${path}" using DeleteFile. DeleteFile only deletes individual files.`,
+          )
         }
 
         // 1. Snapshot BEFORE deletion

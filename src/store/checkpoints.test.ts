@@ -34,7 +34,11 @@ describe('checkpoints store and restoration engine', () => {
   it('records sequential checkpoints and links content-addressed blobs', () => {
     const db = openDb()
     try {
-      const thread = createThread(db, { prompt: 'Checkpoint test', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const thread = createThread(db, {
+        prompt: 'Checkpoint test',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
       const filePath = join(tempDir, 'file.txt')
 
       // 1. Create file.txt -> checkpoint #1
@@ -79,24 +83,34 @@ describe('checkpoints store and restoration engine', () => {
   it('restores workspace to before a checkpoint with CAS safety', () => {
     const db = openDb()
     try {
-      const thread = createThread(db, { prompt: 'Restore test', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const thread = createThread(db, {
+        prompt: 'Restore test',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
       const file1Path = join(tempDir, 'a.txt')
       const file2Path = join(tempDir, 'b.txt')
 
       // Checkpoint #1: Create a.txt
       atomicWrite(file1Path, 'a-initial')
       const afterA1 = snapshot(file1Path)
-      recordCheckpoint(db, thread.id, 'WriteFile', 'call_1', [{ path: 'a.txt', before: null, after: afterA1 }])
+      recordCheckpoint(db, thread.id, 'WriteFile', 'call_1', [
+        { path: 'a.txt', before: null, after: afterA1 },
+      ])
 
       // Checkpoint #2: Create b.txt
       atomicWrite(file2Path, 'b-initial')
       const afterB = snapshot(file2Path)
-      recordCheckpoint(db, thread.id, 'WriteFile', 'call_2', [{ path: 'b.txt', before: null, after: afterB }])
+      recordCheckpoint(db, thread.id, 'WriteFile', 'call_2', [
+        { path: 'b.txt', before: null, after: afterB },
+      ])
 
       // Checkpoint #3: Modify a.txt
       atomicWrite(file1Path, 'a-modified')
       const afterA2 = snapshot(file1Path)
-      recordCheckpoint(db, thread.id, 'EditFile', 'call_3', [{ path: 'a.txt', before: afterA1, after: afterA2 }])
+      recordCheckpoint(db, thread.id, 'EditFile', 'call_3', [
+        { path: 'a.txt', before: afterA1, after: afterA2 },
+      ])
 
       expect(readFileSync(file1Path, 'utf-8')).toBe('a-modified')
       expect(existsSync(file2Path)).toBe(true)
@@ -128,19 +142,27 @@ describe('checkpoints store and restoration engine', () => {
   it('detects CAS #2 conflicts and aborts unless --force is specified', () => {
     const db = openDb()
     try {
-      const thread = createThread(db, { prompt: 'Conflict test', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const thread = createThread(db, {
+        prompt: 'Conflict test',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
       const filePath = join(tempDir, 'file.txt')
 
       // Checkpoint #1: Create file.txt with 'original'
       atomicWrite(filePath, 'original')
       const after = snapshot(filePath)
-      recordCheckpoint(db, thread.id, 'WriteFile', 'call_1', [{ path: 'file.txt', before: null, after }])
+      recordCheckpoint(db, thread.id, 'WriteFile', 'call_1', [
+        { path: 'file.txt', before: null, after },
+      ])
 
       // External modification outside ant
       writeFileSync(filePath, 'external modification by user')
 
       // Attempt restore to checkpoint #1 -> must detect conflict and throw
-      expect(() => restoreCheckpoint(db, thread.id, 1, { cwd: tempDir })).toThrow(/conflicting modifications detected/i)
+      expect(() => restoreCheckpoint(db, thread.id, 1, { cwd: tempDir })).toThrow(
+        /conflicting modifications detected/i,
+      )
 
       // Disk is untouched
       expect(readFileSync(filePath, 'utf-8')).toBe('external modification by user')
@@ -158,8 +180,14 @@ describe('checkpoints store and restoration engine', () => {
   it('throws when attempting to restore non-existent checkpoint', () => {
     const db = openDb()
     try {
-      const thread = createThread(db, { prompt: 'Missing ckpt', cwd: tempDir, model: 'google/gemini-2.5-flash' })
-      expect(() => restoreCheckpoint(db, thread.id, 99, { cwd: tempDir })).toThrow(/Checkpoint #99 does not exist/)
+      const thread = createThread(db, {
+        prompt: 'Missing ckpt',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
+      expect(() => restoreCheckpoint(db, thread.id, 99, { cwd: tempDir })).toThrow(
+        /Checkpoint #99 does not exist/,
+      )
     } finally {
       db.close()
     }

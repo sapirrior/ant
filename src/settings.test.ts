@@ -79,7 +79,9 @@ describe('settings module', () => {
     expect(KEYS['output']!.parse('md')).toBe('md')
     expect(KEYS['output']!.parse('json')).toBe('json')
     expect(KEYS['output']!.parse('stream-json')).toBe('stream-json')
-    expect(() => KEYS['output']!.parse('yaml')).toThrow(/must be "text", "md", "json", or "stream-json"/)
+    expect(() => KEYS['output']!.parse('yaml')).toThrow(
+      /must be "text", "md", "json", or "stream-json"/,
+    )
 
     for (const val of VALID_REASONING) {
       expect(KEYS['reasoning']!.parse(val)).toBe(val)
@@ -123,7 +125,11 @@ describe('settings module', () => {
 
   it('routes warnings through custom warn callback and warns on deprecated allow/deny', () => {
     const settingsPath = join(testHome, 'settings.json')
-    writeFileSync(settingsPath, JSON.stringify({ allow: { read: true }, deny: { mcp: [] }, invalidRandomKey: 123 }), 'utf-8')
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ allow: { read: true }, deny: { mcp: [] }, invalidRandomKey: 123 }),
+      'utf-8',
+    )
     const warnings: string[] = []
     loadSettings({ warn: (w) => warnings.push(w) })
     expect(warnings.some((w) => w.includes('invalidRandomKey'))).toBe(true)

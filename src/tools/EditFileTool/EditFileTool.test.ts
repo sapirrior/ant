@@ -36,7 +36,7 @@ describe('EditFileTool', () => {
     if (!editTool.execute) throw new Error('execute is undefined')
     const result = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
-      execOptions
+      execOptions,
     )) as ToolExecutionResult<{ status: string }>
 
     expect(result.ok).toBe(true)
@@ -49,7 +49,7 @@ describe('EditFileTool', () => {
     if (!editTool.execute) throw new Error('execute is undefined')
     const result = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'line 2', newContent: 'line 2', replaceAll: false },
-      { ...execOptions, toolCallId: '2' }
+      { ...execOptions, toolCallId: '2' },
     )) as ToolExecutionResult<unknown>
 
     expect(result.ok).toBe(false)
@@ -61,7 +61,7 @@ describe('EditFileTool', () => {
     if (!editTool.execute) throw new Error('execute is undefined')
     const result = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'nonexistent', newContent: 'new', replaceAll: false },
-      { ...execOptions, toolCallId: '3' }
+      { ...execOptions, toolCallId: '3' },
     )) as ToolExecutionResult<unknown>
 
     expect(result.ok).toBe(false)
@@ -74,7 +74,7 @@ describe('EditFileTool', () => {
     if (!editTool.execute) throw new Error('execute is undefined')
     const result = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'foo bar', newContent: 'baz', replaceAll: false },
-      { ...execOptions, toolCallId: '4' }
+      { ...execOptions, toolCallId: '4' },
     )) as ToolExecutionResult<unknown>
 
     expect(result.ok).toBe(false)
@@ -87,7 +87,7 @@ describe('EditFileTool', () => {
     if (!editTool.execute) throw new Error('execute is undefined')
     const result = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
-      { ...execOptions, toolCallId: '5' }
+      { ...execOptions, toolCallId: '5' },
     )) as ToolExecutionResult<{ status: string }>
 
     expect(result.ok).toBe(true)
@@ -101,7 +101,7 @@ describe('EditFileTool', () => {
     if (!editTool.execute) throw new Error('execute is undefined')
     const result = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'COST', newContent: '$$50 and $& $1', replaceAll: false },
-      { ...execOptions, toolCallId: '5b' }
+      { ...execOptions, toolCallId: '5b' },
     )) as ToolExecutionResult<{ status: string }>
 
     expect(result.ok).toBe(true)
@@ -122,7 +122,7 @@ describe('EditFileTool', () => {
     // 1. Without having read the file, edit fails
     const res1 = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
-      { ...execOptions, toolCallId: 'cas_1' }
+      { ...execOptions, toolCallId: 'cas_1' },
     )) as ToolExecutionResult<unknown>
     expect(res1.ok).toBe(false)
     expect(res1.error).toMatch(/File changed since you read it \(or was never read\)/)
@@ -131,7 +131,7 @@ describe('EditFileTool', () => {
     readState.set('sample.txt', 'stale_hash_value')
     const res2 = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
-      { ...execOptions, toolCallId: 'cas_2' }
+      { ...execOptions, toolCallId: 'cas_2' },
     )) as ToolExecutionResult<unknown>
     expect(res2.ok).toBe(false)
     expect(res2.error).toMatch(/File changed since you read it \(or was never read\)/)
@@ -143,7 +143,7 @@ describe('EditFileTool', () => {
 
     const res3 = (await editTool.execute(
       { path: 'sample.txt', oldContent: 'line 2', newContent: 'line TWO', replaceAll: false },
-      { ...execOptions, toolCallId: 'cas_3' }
+      { ...execOptions, toolCallId: 'cas_3' },
     )) as ToolExecutionResult<unknown>
     expect(res3.ok).toBe(true)
     expect(readFileSync(testFile, 'utf-8')).toBe('line 1\nline TWO\nline 3\n')

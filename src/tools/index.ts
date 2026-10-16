@@ -13,7 +13,6 @@ import { createWebSearchTool } from './WebSearchTool/WebSearchTool.ts'
 import { createWebFetchTool } from './WebFetchTool/WebFetchTool.ts'
 import { createMcpTool } from './McpTool/McpTool.ts'
 
-
 export function buildTools(context: ToolExecutionContext, settings?: Settings): ToolSet {
   const tools: ToolSet = {}
 

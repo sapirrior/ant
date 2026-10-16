@@ -30,7 +30,9 @@ export function parseDurationMs(durationStr: string): number {
 
   const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)$/)
   if (!match) {
-    throw new Error(`Invalid duration format: "${durationStr}". Use e.g. "30s", "10m", "1h", or milliseconds.`)
+    throw new Error(
+      `Invalid duration format: "${durationStr}". Use e.g. "30s", "10m", "1h", or milliseconds.`,
+    )
   }
 
   const value = Number.parseFloat(match[1]!)
@@ -188,7 +190,9 @@ export const KEYS: Record<string, KeyDefinition> = {
     describe: 'Output format: text | md | json | stream-json',
     parse: (v) => {
       if (!OUTPUT_FORMATS.includes(v as OutputFormat)) {
-        throw new Error(`Setting "outputFormat" must be "text", "md", "json", or "stream-json" (got "${v}")`)
+        throw new Error(
+          `Setting "outputFormat" must be "text", "md", "json", or "stream-json" (got "${v}")`,
+        )
       }
       return v
     },
@@ -207,7 +211,9 @@ export const KEYS: Record<string, KeyDefinition> = {
     describe: 'Alias for outputFormat',
     parse: (v) => {
       if (!OUTPUT_FORMATS.includes(v as OutputFormat)) {
-        throw new Error(`Setting "output" must be "text", "md", "json", or "stream-json" (got "${v}")`)
+        throw new Error(
+          `Setting "output" must be "text", "md", "json", or "stream-json" (got "${v}")`,
+        )
       }
       return v
     },
@@ -257,7 +263,8 @@ export const KEYS: Record<string, KeyDefinition> = {
   },
   reasoning: {
     key: 'reasoning',
-    describe: 'Reasoning effort: provider-default | none | minimal | low | medium | high | xhigh | max',
+    describe:
+      'Reasoning effort: provider-default | none | minimal | low | medium | high | xhigh | max',
     parse: parseReasoning,
     get: (s) => s.reasoning,
     set: (s, v) => {
@@ -386,7 +393,4 @@ for (const t of TOOL_NAMES) {
   }
 }
 
-export const KNOWN_TOP_KEYS = new Set([
-  ...Object.keys(settingsSchema.shape),
-  'effort',
-])
+export const KNOWN_TOP_KEYS = new Set([...Object.keys(settingsSchema.shape), 'effort'])

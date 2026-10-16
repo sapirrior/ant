@@ -5,12 +5,31 @@ import { executeWithPolicy } from '../pipeline.ts'
 import { TASK_MANAGER_DESCRIPTION } from './prompt.ts'
 
 export const taskManagerInputSchema = z.object({
-  action: z.enum(['list', 'read', 'write', 'stop']).describe('Action to perform on background tasks.'),
-  taskId: z.string().optional().describe('Task identifier (e.g. "t1"), required for read, write, stop.'),
-  waitMs: z.number().int().min(0).max(30000).optional().describe('For "read": milliseconds to wait for new output (0..30000, default 0).'),
+  action: z
+    .enum(['list', 'read', 'write', 'stop'])
+    .describe('Action to perform on background tasks.'),
+  taskId: z
+    .string()
+    .optional()
+    .describe('Task identifier (e.g. "t1"), required for read, write, stop.'),
+  waitMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(30000)
+    .optional()
+    .describe('For "read": milliseconds to wait for new output (0..30000, default 0).'),
   input: z.string().optional().describe('For "write": text payload to send to standard input.'),
-  newline: z.boolean().optional().default(true).describe('For "write": whether to append a trailing newline (default true).'),
-  signal: z.enum(['SIGINT', 'SIGTERM', 'SIGKILL']).optional().default('SIGTERM').describe('For "stop": signal to send (default SIGTERM).'),
+  newline: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('For "write": whether to append a trailing newline (default true).'),
+  signal: z
+    .enum(['SIGINT', 'SIGTERM', 'SIGKILL'])
+    .optional()
+    .default('SIGTERM')
+    .describe('For "stop": signal to send (default SIGTERM).'),
 })
 
 export function describeTaskManager(input: z.infer<typeof taskManagerInputSchema>): string {

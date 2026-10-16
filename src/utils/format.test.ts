@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import {
-  collapseInline,
-  padEndVisible,
-  padStartVisible,
-  visibleWidth,
-} from './format.ts'
+import { collapseInline, padEndVisible, padStartVisible, visibleWidth } from './format.ts'
 
 describe('utils/format terminal layout and width utilities', () => {
   it('measures visibleWidth correctly for plain text, ANSI, CJK, and emoji', () => {

@@ -10,9 +10,7 @@ describe('history repair on load (I3)', () => {
   })
 
   it('repairs history ending in a user message by adding synthetic assistant message', () => {
-    const input: ModelMessage[] = [
-      { role: 'user', content: 'hello' },
-    ]
+    const input: ModelMessage[] = [{ role: 'user', content: 'hello' }]
     const { messages, repaired } = repairHistory(input)
     expect(messages.length).toBe(2)
     expect(messages[1]!.role).toBe('assistant')
@@ -36,9 +34,7 @@ describe('history repair on load (I3)', () => {
   })
 
   it('is idempotent: running repair twice yields no new repairs', () => {
-    const input: ModelMessage[] = [
-      { role: 'user', content: 'test' },
-    ]
+    const input: ModelMessage[] = [{ role: 'user', content: 'test' }]
     const first = repairHistory(input)
     const second = repairHistory(first.messages)
     expect(second.messages).toEqual(first.messages)

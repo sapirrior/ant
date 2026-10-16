@@ -17,7 +17,8 @@ describe('markdown renderer', () => {
   })
 
   it('renders level 0 without any escape codes', () => {
-    const md = '# Title\n\nHere is **bold**, *italic*, and `code`.\n\n- Item 1\n- Item 2\n\n```js\nconst x = 1;\n```'
+    const md =
+      '# Title\n\nHere is **bold**, *italic*, and `code`.\n\n- Item 1\n- Item 2\n\n```js\nconst x = 1;\n```'
     const output = renderMarkdown(md, { colorLevel: 0 })
     expect(output).not.toContain('\x1b')
     expect(output).toContain('Title')
@@ -40,7 +41,8 @@ describe('markdown renderer', () => {
   })
 
   it('smart wraps long paragraphs to specified terminal width', () => {
-    const longText = 'Ant is a daily-use streaming agent CLI designed for speed, safety, and natural terminal ergonomics with model agnosticism.'
+    const longText =
+      'Ant is a daily-use streaming agent CLI designed for speed, safety, and natural terminal ergonomics with model agnosticism.'
     const rendered = renderMarkdown(longText, { columns: 40, colorLevel: 0 })
     for (const line of rendered.split('\n')) {
       expect(line.length).toBeLessThanOrEqual(40)

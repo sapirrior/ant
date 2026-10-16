@@ -9,7 +9,7 @@ export class GoogleAdapter implements ProviderAdapter {
   validateAuth(env: NodeJS.ProcessEnv): void {
     if (!env.GOOGLE_GENERATIVE_AI_API_KEY && !env.GEMINI_API_KEY) {
       throw new Error(
-        'Missing environment variable GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY for provider "google".'
+        'Missing environment variable GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY for provider "google".',
       )
     }
   }

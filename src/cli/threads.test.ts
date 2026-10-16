@@ -49,7 +49,11 @@ describe('ant threads CLI command', () => {
 
   it('lists threads with --json', async () => {
     const db = openDb()
-    const t = createThread(db, { prompt: 'CLI list test', cwd: process.cwd(), model: 'google/gemini-2.5-flash' })
+    const t = createThread(db, {
+      prompt: 'CLI list test',
+      cwd: process.cwd(),
+      model: 'google/gemini-2.5-flash',
+    })
     db.close()
 
     const program = createProgram()
@@ -64,7 +68,11 @@ describe('ant threads CLI command', () => {
 
   it('shows thread details and messages with --messages', async () => {
     const db = openDb()
-    const t = createThread(db, { prompt: 'CLI show test', cwd: process.cwd(), model: 'google/gemini-2.5-flash' })
+    const t = createThread(db, {
+      prompt: 'CLI show test',
+      cwd: process.cwd(),
+      model: 'google/gemini-2.5-flash',
+    })
     appendMessage(db, t.id, { role: 'user', content: 'What is the date?' })
     db.close()
 
@@ -79,7 +87,11 @@ describe('ant threads CLI command', () => {
 
   it('renames a thread', async () => {
     const db = openDb()
-    const t = createThread(db, { prompt: 'Before rename', cwd: process.cwd(), model: 'google/gemini-2.5-flash' })
+    const t = createThread(db, {
+      prompt: 'Before rename',
+      cwd: process.cwd(),
+      model: 'google/gemini-2.5-flash',
+    })
     db.close()
 
     const program = createProgram()
@@ -90,7 +102,11 @@ describe('ant threads CLI command', () => {
 
   it('deletes a thread with -y', async () => {
     const db = openDb()
-    const t = createThread(db, { prompt: 'To delete via CLI', cwd: process.cwd(), model: 'google/gemini-2.5-flash' })
+    const t = createThread(db, {
+      prompt: 'To delete via CLI',
+      cwd: process.cwd(),
+      model: 'google/gemini-2.5-flash',
+    })
     db.close()
 
     const program = createProgram()

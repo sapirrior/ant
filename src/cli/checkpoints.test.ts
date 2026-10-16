@@ -51,11 +51,17 @@ describe('ant checkpoints CLI command', () => {
 
   it('lists checkpoints with --json', async () => {
     const db = openDb()
-    const t = createThread(db, { prompt: 'CLI ckpt list test', cwd: process.cwd(), model: 'google/gemini-2.5-flash' })
+    const t = createThread(db, {
+      prompt: 'CLI ckpt list test',
+      cwd: process.cwd(),
+      model: 'google/gemini-2.5-flash',
+    })
     const file = join(tempDir, 'demo.txt')
     writeFileSync(file, 'hello')
     const snap = snapshot(file)
-    recordCheckpoint(db, t.id, 'WriteFile', 'call_1', [{ path: 'demo.txt', before: null, after: snap }])
+    recordCheckpoint(db, t.id, 'WriteFile', 'call_1', [
+      { path: 'demo.txt', before: null, after: snap },
+    ])
     db.close()
 
     const program = createProgram()
@@ -70,15 +76,30 @@ describe('ant checkpoints CLI command', () => {
 
   it('shows details for a single checkpoint sequence', async () => {
     const db = openDb()
-    const t = createThread(db, { prompt: 'CLI ckpt show test', cwd: process.cwd(), model: 'google/gemini-2.5-flash' })
+    const t = createThread(db, {
+      prompt: 'CLI ckpt show test',
+      cwd: process.cwd(),
+      model: 'google/gemini-2.5-flash',
+    })
     const file = join(tempDir, 'demo.txt')
     writeFileSync(file, 'hello')
     const snap = snapshot(file)
-    recordCheckpoint(db, t.id, 'WriteFile', 'call_1', [{ path: 'demo.txt', before: null, after: snap }])
+    recordCheckpoint(db, t.id, 'WriteFile', 'call_1', [
+      { path: 'demo.txt', before: null, after: snap },
+    ])
     db.close()
 
     const program = createProgram()
-    await program.parseAsync(['node', 'ant', 'checkpoints', 'show', '1', '--thread', t.id, '--json'])
+    await program.parseAsync([
+      'node',
+      'ant',
+      'checkpoints',
+      'show',
+      '1',
+      '--thread',
+      t.id,
+      '--json',
+    ])
 
     const parsed = JSON.parse(stdoutBuf)
     expect(parsed.seq).toBe(1)
@@ -91,18 +112,26 @@ describe('ant checkpoints CLI command', () => {
     process.chdir(tempDir)
     try {
       const db = openDb()
-      const t = createThread(db, { prompt: 'CLI restore test', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t = createThread(db, {
+        prompt: 'CLI restore test',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
       const file = join(tempDir, 'app.ts')
 
       // Checkpoint 1: Initial write
       writeFileSync(file, 'v1')
       const snap1 = snapshot(file)
-      recordCheckpoint(db, t.id, 'WriteFile', 'call_1', [{ path: 'app.ts', before: null, after: snap1 }])
+      recordCheckpoint(db, t.id, 'WriteFile', 'call_1', [
+        { path: 'app.ts', before: null, after: snap1 },
+      ])
 
       // Checkpoint 2: Second write
       writeFileSync(file, 'v2')
       const snap2 = snapshot(file)
-      recordCheckpoint(db, t.id, 'EditFile', 'call_2', [{ path: 'app.ts', before: snap1, after: snap2 }])
+      recordCheckpoint(db, t.id, 'EditFile', 'call_2', [
+        { path: 'app.ts', before: snap1, after: snap2 },
+      ])
       db.close()
 
       expect(readFileSync(file, 'utf-8')).toBe('v2')

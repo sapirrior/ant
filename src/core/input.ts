@@ -4,9 +4,11 @@ export const MAX_STDIN_BYTES = 10 * 1024 * 1024 // 10 MiB limit
 
 export async function readPipedStdin(
   maxBytes: number = MAX_STDIN_BYTES,
-  timeoutMs = process.env.ANT_STDIN_TIMEOUT ? Number.parseInt(process.env.ANT_STDIN_TIMEOUT, 10) : 0,
+  timeoutMs = process.env.ANT_STDIN_TIMEOUT
+    ? Number.parseInt(process.env.ANT_STDIN_TIMEOUT, 10)
+    : 0,
   signal?: AbortSignal,
-  hardTimeoutMs?: number
+  hardTimeoutMs?: number,
 ): Promise<string | undefined> {
   if (process.stdin.isTTY) {
     return undefined
@@ -74,7 +76,9 @@ export async function readPipedStdin(
       if (totalBytes > maxBytes) {
         cleanup()
         process.stdin.destroy()
-        reject(new Error(`Piped stdin exceeds the maximum allowed size of ${maxBytes} bytes (10 MiB).`))
+        reject(
+          new Error(`Piped stdin exceeds the maximum allowed size of ${maxBytes} bytes (10 MiB).`),
+        )
         return
       }
       chunks.push(buf)
@@ -100,10 +104,14 @@ export async function readPipedStdin(
         resolve(undefined)
         return
       }
-      signal.addEventListener('abort', () => {
-        cleanup()
-        resolve(undefined)
-      }, { once: true })
+      signal.addEventListener(
+        'abort',
+        () => {
+          cleanup()
+          resolve(undefined)
+        },
+        { once: true },
+      )
     }
 
     resetIdleTimer()

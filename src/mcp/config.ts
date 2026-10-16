@@ -1,10 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { McpConfigFile, McpScope, McpServerConfig, ResolvedMcpServer } from './types.ts'
 
@@ -41,7 +35,9 @@ export function loadMcpConfigFile(filePath: string): McpConfigFile {
   try {
     raw = readFileSync(filePath, 'utf-8')
   } catch (err) {
-    throw new Error(`Failed to read MCP config from ${filePath}: ${err instanceof Error ? err.message : String(err)}`)
+    throw new Error(
+      `Failed to read MCP config from ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 
   if (!raw.trim()) {
@@ -52,7 +48,9 @@ export function loadMcpConfigFile(filePath: string): McpConfigFile {
   try {
     parsed = JSON.parse(raw)
   } catch (err) {
-    throw new Error(`MCP config file at ${filePath} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`)
+    throw new Error(
+      `MCP config file at ${filePath} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -75,13 +73,15 @@ export function saveMcpConfigFile(filePath: string, config: McpConfigFile): void
 
 export function resolveMergedMcpServers(
   cwd: string = process.cwd(),
-  options: { ignoreProjectScope?: boolean } = {}
+  options: { ignoreProjectScope?: boolean } = {},
 ): Map<string, ResolvedMcpServer> {
   const globalPath = getGlobalMcpConfigPath()
   const projectPath = getProjectMcpConfigPath(cwd)
 
   const globalConfig = loadMcpConfigFile(globalPath)
-  const projectConfig = options.ignoreProjectScope ? { mcpServers: {} } : loadMcpConfigFile(projectPath)
+  const projectConfig = options.ignoreProjectScope
+    ? { mcpServers: {} }
+    : loadMcpConfigFile(projectPath)
 
   const map = new Map<string, ResolvedMcpServer>()
 
@@ -120,7 +120,7 @@ export async function addMcpServer(
   scope: McpScope,
   name: string,
   serverConfig: McpServerConfig,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
 ): Promise<void> {
   const filePath = scope === 'global' ? getGlobalMcpConfigPath() : getProjectMcpConfigPath(cwd)
   const lockPath = scope === 'global' ? getGlobalMcpLockPath() : getProjectMcpLockPath(cwd)
@@ -136,7 +136,7 @@ export async function addMcpServer(
 export async function removeMcpServer(
   scope: McpScope,
   name: string,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
 ): Promise<boolean> {
   const filePath = scope === 'global' ? getGlobalMcpConfigPath() : getProjectMcpConfigPath(cwd)
   const lockPath = scope === 'global' ? getGlobalMcpLockPath() : getProjectMcpLockPath(cwd)
@@ -157,7 +157,7 @@ export async function setMcpServerEnabled(
   scope: McpScope,
   name: string,
   enabled: boolean,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
 ): Promise<boolean> {
   const filePath = scope === 'global' ? getGlobalMcpConfigPath() : getProjectMcpConfigPath(cwd)
   const lockPath = scope === 'global' ? getGlobalMcpLockPath() : getProjectMcpLockPath(cwd)

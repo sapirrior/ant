@@ -27,14 +27,18 @@ export function loadRawSettings(): Settings {
   try {
     raw = readFileSync(path, 'utf-8')
   } catch (err) {
-    throw new Error(`Failed to read settings from ${path}: ${err instanceof Error ? err.message : String(err)}`)
+    throw new Error(
+      `Failed to read settings from ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 
   let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(raw)
   } catch (err) {
-    throw new Error(`Settings file at ${path} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`)
+    throw new Error(
+      `Settings file at ${path} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -65,14 +69,18 @@ export function loadSettings(options?: LoadSettingsOptions): Settings {
   try {
     raw = readFileSync(path, 'utf-8')
   } catch (err) {
-    throw new Error(`Failed to read settings from ${path}: ${err instanceof Error ? err.message : String(err)}`)
+    throw new Error(
+      `Failed to read settings from ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 
   let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(raw)
   } catch (err) {
-    throw new Error(`Settings file at ${path} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`)
+    throw new Error(
+      `Settings file at ${path} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

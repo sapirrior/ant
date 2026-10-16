@@ -4,7 +4,7 @@
 
 ### **The post-modern autonomous print agent.**
 
-*Terminal-native. Model-agnostic. Headless by design. Instant time-travel rollback.*
+_Terminal-native. Model-agnostic. Headless by design. Instant time-travel rollback._
 
 [![Version](https://img.shields.io/badge/version-0.10.0-blue.svg?style=flat-square)](package.json)
 [![Runtime](https://img.shields.io/badge/runtime-Bun%20Only-black.svg?style=flat-square)](https://bun.sh)
@@ -48,31 +48,39 @@ No interactive prompts. No `/dev/tty` blocking. Just pure terminal autonomy.
 ```
 
 ### 1. 🖨️ True Print-Native Execution
+
 Feed it a prompt directly (`ant "Fix auth bug"` or `ant -p "Fix auth bug"`), stream results in real time, and let your scripts inspect standard POSIX exit codes (`0` for success, non-zero for failures). `-p/--print` is supported for backward compatibility, but optional—positional prompts run immediately. Perfect for local CLI aliases, git hooks, and unattended CI/CD runners.
 
 ### 2. ⏪ Time-Travel Checkpoints (Instant Undo)
+
 Never worry about an autonomous agent corrupting your codebase. Before modifying, creating, or deleting a file, `ant` creates content-addressed snapshots in a lightweight local SQLite store. If an edit wasn't what you wanted, preview and rewind instantly:
+
 ```bash
 ant checkpoints restore 1
 ```
 
 ### 3. 🌐 Zero Provider Lock-In
+
 Switch models with a single flag. Powered by the Vercel AI SDK, `ant` comes out of the box with tuned adapters for:
-* **Anthropic** (automatic ephemeral prompt caching)
-* **Google Gemini** (developer-grade safety settings)
-* **OpenAI & DeepSeek** (server-side prefix cache alignment)
-* **Groq & xAI** (ultra-fast inference)
-* **Ollama** (offline, 100% private local models)
-* **OpenAI-Compatible** custom gateways
+
+- **Anthropic** (automatic ephemeral prompt caching)
+- **Google Gemini** (developer-grade safety settings)
+- **OpenAI & DeepSeek** (server-side prefix cache alignment)
+- **Groq & xAI** (ultra-fast inference)
+- **Ollama** (offline, 100% private local models)
+- **OpenAI-Compatible** custom gateways
 
 ### 4. 🛡️ Deterministic Permission Policies
+
 Unattended runs should never hang waiting for a human to press `[y/N]`. Tool access is governed by strict, declarative modes:
-* `default` — Safe read-only inspection. Workspace file edits and Bash commands require explicit allow rules.
-* `acceptEdits` — Auto-approves workspace file edits (`WriteFile`, `EditFile`, `DeleteFile`); isolates shell commands.
-* `plan` — Pure reconnaissance; mutating tools are hidden from the model.
-* `bypassPermissions` — Full autonomous execution (can still be bounded with `--disallowed-tools`).
+
+- `default` — Safe read-only inspection. Workspace file edits and Bash commands require explicit allow rules.
+- `acceptEdits` — Auto-approves workspace file edits (`WriteFile`, `EditFile`, `DeleteFile`); isolates shell commands.
+- `plan` — Pure reconnaissance; mutating tools are hidden from the model.
+- `bypassPermissions` — Full autonomous execution (can still be bounded with `--disallowed-tools`).
 
 ### 5. 🔄 Resumable Sessions & Context Continuation
+
 Continue a multi-turn conversation thread seamlessly (`ant -p -c "Now write unit tests"`), swap the model mid-session, or run fully ephemeral runs with `--no-session-persistence`.
 
 ---
@@ -131,6 +139,7 @@ ant "Fix the failing test in agent.test.ts" --permission-mode acceptEdits --allo
 In `ant`, tool security is governed by a single, transparent declarative permission system. There are no hidden classifiers or unexpected prompts.
 
 ### Evaluation Order (Deterministic)
+
 1. **Disallowed Rules (`--disallowed-tools`)**: If any deny rule matches, the tool is immediately **denied**. Deny rules always win, even over `--dangerously-skip-permissions`.
 2. **Bypass Mode (`bypassPermissions`)**: If `--dangerously-skip-permissions` is active, the tool is allowed.
 3. **Allowed Rules (`--allowed-tools`)**: If an explicit allow rule matches, the tool is allowed.
@@ -142,15 +151,18 @@ In `ant`, tool security is governed by a single, transparent declarative permiss
    `"Permission denied: Bash(git status) not allowed in mode default. Allow with --allowed-tools 'Bash(git status)'."`
 
 ### Pattern Syntax
-| Tool | Target Matched | Pattern Syntax | Examples |
-| :--- | :--- | :--- | :--- |
-| `Bash` | Command string | Token-boundary prefix matching. **Compound chaining (`; & \| \n \` $()` is strictly rejected** on scoped allow rules. | `Bash(git *)`, `Bash(bun test *)`, `Bash(ant --version)` |
+
+| Tool                                                                   | Target Matched                                   | Pattern Syntax                                                                                                                                         | Examples                                                                   |
+| :--------------------------------------------------------------------- | :----------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------- |
+| `Bash`                                                                 | Command string                                   | Token-boundary prefix matching. **Compound chaining (`; & \| \n \` $()` is strictly rejected** on scoped allow rules.                                  | `Bash(git *)`, `Bash(bun test *)`, `Bash(ant --version)`                   |
 | Filesystem (`ReadFile`, `WriteFile`, `EditFile`, `DeleteFile`, `Grep`) | POSIX path normalized relative to workspace root | High-performance `Bun.Glob`. `*` matches files in root directory; `**` matches recursively. Sensitive files (`.env`, `id_rsa`) require explicit rules. | `ReadFile(*)`, `WriteFile(src/**/*)`, `EditFile(*.json)`, `ReadFile(.env)` |
-| `WebFetch` | URL hostname | Glob match on hostname. Private/loopback IPs (SSRF) strictly prohibited. | `WebFetch(*.github.com)`, `WebFetch(bun.sh)` |
-| `McpTool` | `server/tool` | Glob match on server name and tool name. | `McpTool(github/*)`, `McpTool(context7/get_*)` |
+| `WebFetch`                                                             | URL hostname                                     | Glob match on hostname. Private/loopback IPs (SSRF) strictly prohibited.                                                                               | `WebFetch(*.github.com)`, `WebFetch(bun.sh)`                               |
+| `McpTool`                                                              | `server/tool`                                    | Glob match on server name and tool name.                                                                                                               | `McpTool(github/*)`, `McpTool(context7/get_*)`                             |
 
 ### Managing Persistent Rules
+
 You can manage permissions in `~/.ant/settings.json` using the `ant config` subcommands:
+
 ```bash
 # Add a rule to the allowed list
 ant config add allowedTools "Bash(git *)"
@@ -171,21 +183,25 @@ ant config unset allowedTools
 ## 💡 Real-World Recipes
 
 ### 🔍 Pipe Git Diffs for Instant Code Review
+
 ```bash
 git diff main | ant "Review this patch for memory leaks, performance bugs, and edge cases"
 ```
 
 ### 📊 Extract Structured JSON for CI Automation
+
 ```bash
 ant "List all exported functions in src/tools/index.ts" -o json | jq -r '.result'
 ```
 
 ### ⚡ Stream Real-Time NDJSON Events
+
 ```bash
 ant "Build project and inspect compiler output" -o stream-json | grep --line-buffered '"type":"tool-call"'
 ```
 
 ### 🔄 Multi-turn Iteration
+
 ```bash
 # Start a task
 ant "Inspect package.json and identify dependencies that have major version bumps"
@@ -198,6 +214,7 @@ ant -r th_1792139027_b1efa8d0 "Let's begin upgrading the first package"
 ```
 
 ### ⏪ Checkpoint Rewind (Undo Mistakes)
+
 ```bash
 # View all recent changes made by ant
 ant checkpoints list

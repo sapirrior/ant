@@ -137,7 +137,11 @@ describe('threads store', () => {
   it('renames a thread with strict validation', () => {
     const db = openDb()
     try {
-      const t = createThread(db, { prompt: 'Initial title', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t = createThread(db, {
+        prompt: 'Initial title',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
       const renamed = renameThread(db, t.id, '  Updated   title  ')
       expect(renamed.title).toBe('Updated title')
 
@@ -151,7 +155,11 @@ describe('threads store', () => {
   it('deletes a thread and cascades messages', () => {
     const db = openDb()
     try {
-      const t = createThread(db, { prompt: 'To delete', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t = createThread(db, {
+        prompt: 'To delete',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
       appendMessage(db, t.id, { role: 'user', content: 'Hello' })
       expect(getMessages(db, t.id).length).toBe(1)
 
@@ -159,7 +167,9 @@ describe('threads store', () => {
       expect(() => getThread(db, t.id)).toThrow(/Thread not found/)
 
       // Verify cascade
-      const msgCount = db.query('SELECT COUNT(*) as cnt FROM messages WHERE thread_id = ?').get(t.id) as { cnt: number }
+      const msgCount = db
+        .query('SELECT COUNT(*) as cnt FROM messages WHERE thread_id = ?')
+        .get(t.id) as { cnt: number }
       expect(msgCount.cnt).toBe(0)
     } finally {
       db.close()
@@ -169,7 +179,11 @@ describe('threads store', () => {
   it('stores and retrieves ModelMessages verbatim', () => {
     const db = openDb()
     try {
-      const t = createThread(db, { prompt: 'Conversation', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t = createThread(db, {
+        prompt: 'Conversation',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
 
       const userMsg: ModelMessage = {
         role: 'user',
@@ -181,15 +195,30 @@ describe('threads store', () => {
         role: 'assistant',
         content: [
           { type: 'text', text: 'Let me calculate.' },
-          { type: 'tool-call', toolCallId: 'call_1', toolName: 'calculator', input: { expr: '2+2' } },
+          {
+            type: 'tool-call',
+            toolCallId: 'call_1',
+            toolName: 'calculator',
+            input: { expr: '2+2' },
+          },
         ],
       }
       const toolMsg: ModelMessage = {
         role: 'tool',
-        content: [{ type: 'tool-result', toolCallId: 'call_1', toolName: 'calculator', output: { type: 'text', value: '4' } }],
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call_1',
+            toolName: 'calculator',
+            output: { type: 'text', value: '4' },
+          },
+        ],
       }
 
-      recordStepMessages(db, t.id, [assistantMsg, toolMsg], 1, { inputTokens: 50, outputTokens: 20 })
+      recordStepMessages(db, t.id, [assistantMsg, toolMsg], 1, {
+        inputTokens: 50,
+        outputTokens: 20,
+      })
 
       const messages = getMessages(db, t.id)
       expect(messages.length).toBe(3)
@@ -211,9 +240,17 @@ describe('threads store', () => {
   it('refuses deletion when active lease is held by a live process', () => {
     const db = openDb()
     try {
-      const t = createThread(db, { prompt: 'Active lease test', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t = createThread(db, {
+        prompt: 'Active lease test',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
       // Simulate active lease held by current process
-      db.run('UPDATE threads SET lock_pid = ?, lock_at = ? WHERE id = ?', [process.pid, Date.now(), t.id])
+      db.run('UPDATE threads SET lock_pid = ?, lock_at = ? WHERE id = ?', [
+        process.pid,
+        Date.now(),
+        t.id,
+      ])
 
       expect(() => deleteThread(db, t.id)).toThrow(/Cannot delete thread.*active lease held by pid/)
       expect(getThread(db, t.id).id).toBe(t.id)
@@ -225,26 +262,58 @@ describe('threads store', () => {
   it('performs blob GC correctly across multiple checkpoints and threads', () => {
     const db = openDb()
     try {
-      const t1 = createThread(db, { prompt: 'Thread A', cwd: tempDir, model: 'google/gemini-2.5-flash' })
-      const t2 = createThread(db, { prompt: 'Thread B', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t1 = createThread(db, {
+        prompt: 'Thread A',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
+      const t2 = createThread(db, {
+        prompt: 'Thread B',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
 
       // Insert 3 blobs
       const hashX = 'hash_x_1111'
       const hashY = 'hash_y_shared'
       const hashZ = 'hash_z_3333'
-      db.run('INSERT INTO blobs (hash, size, data) VALUES (?, ?, ?)', [hashX, 10, Buffer.from('blobX')])
-      db.run('INSERT INTO blobs (hash, size, data) VALUES (?, ?, ?)', [hashY, 20, Buffer.from('blobY')])
-      db.run('INSERT INTO blobs (hash, size, data) VALUES (?, ?, ?)', [hashZ, 30, Buffer.from('blobZ')])
+      db.run('INSERT INTO blobs (hash, size, data) VALUES (?, ?, ?)', [
+        hashX,
+        10,
+        Buffer.from('blobX'),
+      ])
+      db.run('INSERT INTO blobs (hash, size, data) VALUES (?, ?, ?)', [
+        hashY,
+        20,
+        Buffer.from('blobY'),
+      ])
+      db.run('INSERT INTO blobs (hash, size, data) VALUES (?, ?, ?)', [
+        hashZ,
+        30,
+        Buffer.from('blobZ'),
+      ])
 
       // Checkpoint on Thread 1 references hashX (before) and hashY (after)
-      db.run('INSERT INTO checkpoints (thread_id, seq, created_at, tool) VALUES (?, 1, ?, "WriteFile")', [t1.id, Date.now()])
+      db.run(
+        'INSERT INTO checkpoints (thread_id, seq, created_at, tool) VALUES (?, 1, ?, "WriteFile")',
+        [t1.id, Date.now()],
+      )
       const cp1Id = (db.query('SELECT last_insert_rowid() AS id').get() as { id: number }).id
-      db.run('INSERT INTO checkpoint_files (checkpoint_id, path, before_hash, after_hash, mode) VALUES (?, "f1.ts", ?, ?, ?)', [cp1Id, hashX, hashY, 0o644])
+      db.run(
+        'INSERT INTO checkpoint_files (checkpoint_id, path, before_hash, after_hash, mode) VALUES (?, "f1.ts", ?, ?, ?)',
+        [cp1Id, hashX, hashY, 0o644],
+      )
 
       // Checkpoint on Thread 2 references hashY (before) and hashZ (after)
-      db.run('INSERT INTO checkpoints (thread_id, seq, created_at, tool) VALUES (?, 1, ?, "EditFile")', [t2.id, Date.now()])
+      db.run(
+        'INSERT INTO checkpoints (thread_id, seq, created_at, tool) VALUES (?, 1, ?, "EditFile")',
+        [t2.id, Date.now()],
+      )
       const cp2Id = (db.query('SELECT last_insert_rowid() AS id').get() as { id: number }).id
-      db.run('INSERT INTO checkpoint_files (checkpoint_id, path, before_hash, after_hash, mode) VALUES (?, "f2.ts", ?, ?, ?)', [cp2Id, hashY, hashZ, 0o644])
+      db.run(
+        'INSERT INTO checkpoint_files (checkpoint_id, path, before_hash, after_hash, mode) VALUES (?, "f2.ts", ?, ?, ?)',
+        [cp2Id, hashY, hashZ, 0o644],
+      )
 
       // Delete Thread 1: hashX must be deleted; hashY must survive because Thread 2 still references it
       deleteThread(db, t1.id)
@@ -267,11 +336,28 @@ describe('threads store', () => {
   it('guarantees gapless sequential seq numbers under rapid step appending', () => {
     const db = openDb()
     try {
-      const t = createThread(db, { prompt: 'Sequence test', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t = createThread(db, {
+        prompt: 'Sequence test',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
 
       for (let i = 0; i < 20; i++) {
-        const msgA: ModelMessage = { role: 'assistant', content: [{ type: 'text', text: `step ${i} text` }] }
-        const msgB: ModelMessage = { role: 'tool', content: [{ type: 'tool-result', toolCallId: `call_${i}`, toolName: 't', output: { type: 'text', value: 'ok' } }] }
+        const msgA: ModelMessage = {
+          role: 'assistant',
+          content: [{ type: 'text', text: `step ${i} text` }],
+        }
+        const msgB: ModelMessage = {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: `call_${i}`,
+              toolName: 't',
+              output: { type: 'text', value: 'ok' },
+            },
+          ],
+        }
         recordStepMessages(db, t.id, [msgA, msgB], 1, { inputTokens: 10, outputTokens: 5 })
       }
 
@@ -291,12 +377,19 @@ describe('threads store', () => {
   it('correctly preserves complex multimodal/reasoning and large ModelMessage payloads', () => {
     const db = openDb()
     try {
-      const t = createThread(db, { prompt: 'Complex message test', cwd: tempDir, model: 'google/gemini-2.5-flash' })
+      const t = createThread(db, {
+        prompt: 'Complex message test',
+        cwd: tempDir,
+        model: 'google/gemini-2.5-flash',
+      })
 
       const complexMsg: ModelMessage = {
         role: 'assistant',
         content: [
-          { type: 'reasoning', text: 'Thinking step with special chars: 🚀 <html> & "quotes" \n\t multi-line' },
+          {
+            type: 'reasoning',
+            text: 'Thinking step with special chars: 🚀 <html> & "quotes" \n\t multi-line',
+          },
           { type: 'text', text: 'Here is the answer: ' + 'x'.repeat(50000) },
           {
             type: 'tool-call',

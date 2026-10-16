@@ -124,7 +124,7 @@ export function formatToolTarget(toolName: string, input: unknown, cwd?: string)
 export function formatToolOutcome(
   toolName: string,
   rawOutput: unknown,
-  isError?: boolean
+  isError?: boolean,
 ): ToolOutcomeResult {
   if (isError) {
     let errStr = 'failed'
@@ -202,7 +202,12 @@ export function formatToolOutcome(
     }
 
     case 'ListDir': {
-      const count = typeof obj.count === 'number' ? obj.count : Array.isArray(obj.entries) ? obj.entries.length : undefined
+      const count =
+        typeof obj.count === 'number'
+          ? obj.count
+          : Array.isArray(obj.entries)
+            ? obj.entries.length
+            : undefined
       const total = typeof obj.totalEntries === 'number' ? obj.totalEntries : undefined
       const truncated = obj.truncated ? ' (truncated)' : ''
       if (count !== undefined && total !== undefined && count !== total) {
@@ -221,7 +226,11 @@ export function formatToolOutcome(
     }
 
     case 'Grep': {
-      const matches = Array.isArray(obj.matches) ? obj.matches.length : typeof obj.totalMatches === 'number' ? obj.totalMatches : 0
+      const matches = Array.isArray(obj.matches)
+        ? obj.matches.length
+        : typeof obj.totalMatches === 'number'
+          ? obj.totalMatches
+          : 0
       const truncated = obj.truncated ? ' (truncated)' : ''
       return {
         summary: `${matches} match(es)${truncated}`,
@@ -260,7 +269,10 @@ export function formatToolOutcome(
       }
       if (typeof obj.action === 'string') {
         if (obj.action === 'write') {
-          return { summary: `sent ${Number(obj.bytesWritten ?? 0)} chars to stdin`, severity: 'success' }
+          return {
+            summary: `sent ${Number(obj.bytesWritten ?? 0)} chars to stdin`,
+            severity: 'success',
+          }
         }
         if (obj.action === 'stop') {
           return { summary: `stopped task ${obj.taskId ?? ''}`.trim(), severity: 'success' }
@@ -269,13 +281,21 @@ export function formatToolOutcome(
       if (typeof obj.output === 'string') {
         const chars = obj.output.length
         const kb = (chars / 1024).toFixed(1)
-        return { summary: `${kb} KB output · status: ${obj.status ?? 'unknown'}`, severity: 'success' }
+        return {
+          summary: `${kb} KB output · status: ${obj.status ?? 'unknown'}`,
+          severity: 'success',
+        }
       }
       return { summary: 'ok', severity: 'success' }
     }
 
     case 'WebSearch': {
-      const total = typeof obj.totalResults === 'number' ? obj.totalResults : Array.isArray(obj.results) ? obj.results.length : undefined
+      const total =
+        typeof obj.totalResults === 'number'
+          ? obj.totalResults
+          : Array.isArray(obj.results)
+            ? obj.results.length
+            : undefined
       if (total !== undefined) {
         return { summary: `${total} result(s)`, severity: 'success' }
       }
@@ -314,7 +334,7 @@ export class StderrLogger {
     private readonly level: LogLevel = 'info',
     colorLevel?: ColorLevel,
     theme?: ThemeMode,
-    cwd: string = process.cwd()
+    cwd: string = process.cwd(),
   ) {
     this.fmt = createColorFormatter(colorLevel, theme)
     this.sym = getSymbols()
@@ -370,23 +390,25 @@ export class StderrLogger {
     if (!this.shouldLog('info')) return
 
     const providerStr = options.provider ? ` (${options.provider})` : ''
-    const msgCountStr = options.isNew ? '' : options.messageCount !== undefined ? ` · ${options.messageCount} msg` : ''
+    const msgCountStr = options.isNew
+      ? ''
+      : options.messageCount !== undefined
+        ? ` · ${options.messageCount} msg`
+        : ''
     const capsStr = options.allowedCaps.length > 0 ? ` · [${options.allowedCaps.join(',')}]` : ''
 
     process.stderr.write(
-      `${this.fmt.bold(options.model)}${this.fmt.muted(providerStr)} ${this.fmt.muted('·')} ${this.fmt.accent(options.threadId)}${this.fmt.muted(capsStr)}${this.fmt.muted(msgCountStr)}\n`
+      `${this.fmt.bold(options.model)}${this.fmt.muted(providerStr)} ${this.fmt.muted('·')} ${this.fmt.accent(options.threadId)}${this.fmt.muted(capsStr)}${this.fmt.muted(msgCountStr)}\n`,
     )
 
     if (options.modelMismatchOld) {
       process.stderr.write(
-        `  ${this.fmt.warning(`note: model changed from ${options.modelMismatchOld}`)}\n`
+        `  ${this.fmt.warning(`note: model changed from ${options.modelMismatchOld}`)}\n`,
       )
     }
 
     if (options.toolsList && this.shouldLog('debug')) {
-      process.stderr.write(
-        `  ${this.fmt.muted(`tools: ${options.toolsList.join(', ')}`)}\n`
-      )
+      process.stderr.write(`  ${this.fmt.muted(`tools: ${options.toolsList.join(', ')}`)}\n`)
     }
     process.stderr.write('\n')
   }
@@ -411,7 +433,8 @@ export class StderrLogger {
 
     const cols = this.getStderrCols()
     // Prefix: symbol + space + name + space
-    const fixedPrefixWidth = visibleWidth(this.sym.tool) + 1 + visibleWidth(name) + (description ? 1 : 0)
+    const fixedPrefixWidth =
+      visibleWidth(this.sym.tool) + 1 + visibleWidth(name) + (description ? 1 : 0)
     const maxDescWidth = Math.max(0, cols - fixedPrefixWidth)
     const collapsedDesc = description ? collapseInline(description, maxDescWidth) : ''
     const descStr = collapsedDesc ? ` ${this.fmt.muted(collapsedDesc)}` : ''
@@ -424,7 +447,7 @@ export class StderrLogger {
     durationMs?: number,
     isError: boolean = false,
     callId?: string,
-    severity?: OutcomeSeverity
+    severity?: OutcomeSeverity,
   ): void {
     if (!this.shouldLog('info')) return
 
@@ -446,8 +469,8 @@ export class StderrLogger {
       effSeverity === 'error'
         ? this.fmt.error(mark)
         : effSeverity === 'warning'
-        ? this.fmt.warning(mark)
-        : this.fmt.success(mark)
+          ? this.fmt.warning(mark)
+          : this.fmt.success(mark)
 
     const cols = this.getStderrCols()
     const fixedPrefixWidth = 2 + visibleWidth(this.sym.result) + 1 + visibleWidth(mark) + 1 // '  ⎿ ✓ '
@@ -464,8 +487,8 @@ export class StderrLogger {
         effSeverity === 'error'
           ? this.fmt.error(boundedSummary)
           : effSeverity === 'warning'
-          ? this.fmt.warning(boundedSummary)
-          : this.fmt.success(boundedSummary)
+            ? this.fmt.warning(boundedSummary)
+            : this.fmt.success(boundedSummary)
       lineBody = ` ${this.fmt.muted(disambigClean)} · ${summaryColored}${this.fmt.muted(durStr)}`
     } else {
       const maxSummaryWidth = Math.max(10, cols - fixedPrefixWidth - durWidth)
@@ -474,8 +497,8 @@ export class StderrLogger {
         effSeverity === 'error'
           ? this.fmt.error(boundedSummary)
           : effSeverity === 'warning'
-          ? this.fmt.warning(boundedSummary)
-          : this.fmt.success(boundedSummary)
+            ? this.fmt.warning(boundedSummary)
+            : this.fmt.success(boundedSummary)
       lineBody = ` ${summaryColored}${this.fmt.muted(durStr)}`
     }
 
@@ -498,25 +521,26 @@ export class StderrLogger {
     const durStr = ` · ${formatDuration(options.durationMs)}`
 
     if (ok) {
-      process.stderr.write(
-        `\n${statusText} · ${options.steps} step(s)${tokenStr}${durStr}\n`
-      )
+      process.stderr.write(`\n${statusText} · ${options.steps} step(s)${tokenStr}${durStr}\n`)
     } else {
       const cols = this.getStderrCols()
-      const fixedWidth = visibleWidth(options.status) + 2 + String(options.steps).length + 9 + visibleWidth(durStr) + 4
+      const fixedWidth =
+        visibleWidth(options.status) +
+        2 +
+        String(options.steps).length +
+        9 +
+        visibleWidth(durStr) +
+        4
       const maxErrWidth = Math.max(10, cols - fixedWidth)
       const errReason = options.error ? `: ${collapseInline(options.error, maxErrWidth)}` : ''
-      process.stderr.write(
-        `\n${statusText}${errReason} · ${options.steps} step(s)${durStr}\n`
-      )
+      process.stderr.write(`\n${statusText}${errReason} · ${options.steps} step(s)${durStr}\n`)
     }
 
     if (options.threadId && options.threadId !== 'ephemeral') {
       const checkpointHint = options.hasCheckpoints ? ' · undo: ant checkpoints' : ''
       process.stderr.write(
-        `${this.fmt.muted('resume:')} ant -r ${this.fmt.accent(options.threadId)}${this.fmt.muted(checkpointHint)}\n`
+        `${this.fmt.muted('resume:')} ant -r ${this.fmt.accent(options.threadId)}${this.fmt.muted(checkpointHint)}\n`,
       )
     }
   }
 }
-

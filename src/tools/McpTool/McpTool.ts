@@ -9,7 +9,10 @@ export const mcpInputSchema = z.object({
   action: z.enum(['list_servers', 'list_tools', 'call']).describe('The MCP action to perform'),
   server: z.string().optional().describe('The name of the target MCP server'),
   tool: z.string().optional().describe('The tool name to execute on the server (for "call")'),
-  args: z.record(z.string(), z.unknown()).optional().describe('Arguments to pass to the MCP tool (for "call")'),
+  args: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe('Arguments to pass to the MCP tool (for "call")'),
 })
 
 export function createMcpTool(context: ToolExecutionContext) {
@@ -18,7 +21,10 @@ export function createMcpTool(context: ToolExecutionContext) {
   return tool({
     description: MCP_TOOL_PROMPT,
     inputSchema: mcpInputSchema,
-    execute: async (input, { abortSignal }: { abortSignal?: AbortSignal } = {}): Promise<ToolExecutionResult> => {
+    execute: async (
+      input,
+      { abortSignal }: { abortSignal?: AbortSignal } = {},
+    ): Promise<ToolExecutionResult> => {
       const mergedContext = abortSignal ? { ...context, abortSignal } : context
       return executeWithPolicy('McpTool', input, mergedContext, async () => {
         const signal = mergedContext.abortSignal

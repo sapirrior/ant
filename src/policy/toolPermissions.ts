@@ -6,19 +6,9 @@ export type { PermissionMode }
 
 export const KNOWN_TOOLS: readonly ToolName[] = TOOL_NAMES
 
-const READ_ONLY_TOOLS = new Set<ToolName>([
-  'ReadFile',
-  'ListDir',
-  'Grep',
-  'WebSearch',
-  'WebFetch',
-])
+const READ_ONLY_TOOLS = new Set<ToolName>(['ReadFile', 'ListDir', 'Grep', 'WebSearch', 'WebFetch'])
 
-const WRITE_TOOLS = new Set<ToolName>([
-  'WriteFile',
-  'EditFile',
-  'DeleteFile',
-])
+const WRITE_TOOLS = new Set<ToolName>(['WriteFile', 'EditFile', 'DeleteFile'])
 
 export interface ParsedToolRule {
   readonly raw: string
@@ -79,7 +69,11 @@ export function normalizePathForPolicy(targetPath: string, cwd: string): string 
   return resolved
 }
 
-export function primaryArg(tool: ToolName | string, input: unknown, cwd: string = process.cwd()): string {
+export function primaryArg(
+  tool: ToolName | string,
+  input: unknown,
+  cwd: string = process.cwd(),
+): string {
   if (typeof input !== 'object' || input === null) return ''
   const record = input as Record<string, unknown>
 
@@ -195,7 +189,7 @@ export function matchToolRule(
   rule: ParsedToolRule,
   toolName: ToolName | string,
   primaryArgStr: string,
-  isDeny: boolean = false
+  isDeny: boolean = false,
 ): boolean {
   if (rule.tool !== toolName) {
     return false
@@ -252,7 +246,7 @@ export interface ResolveEffectivePermissionsOptions {
 }
 
 export function resolveEffectivePermissions(
-  options: ResolveEffectivePermissionsOptions
+  options: ResolveEffectivePermissionsOptions,
 ): EffectivePermissions {
   const { mode, allowedRules, disallowedRules, exposedToolsFilter } = options
 
@@ -263,7 +257,7 @@ export function resolveEffectivePermissions(
     baseExposed = [...KNOWN_TOOLS]
   }
 
-  if (exposedToolsFilter && exposedToolsFilter.length > 0) {
+  if (exposedToolsFilter !== undefined) {
     baseExposed = baseExposed.filter((t) => exposedToolsFilter.includes(t))
   }
 
@@ -300,7 +294,10 @@ export function resolveEffectivePermissions(
       }
 
       // Read-only tools in default, acceptEdits, plan
-      if ((mode === 'default' || mode === 'acceptEdits' || mode === 'plan') && READ_ONLY_TOOLS.has(tool as ToolName)) {
+      if (
+        (mode === 'default' || mode === 'acceptEdits' || mode === 'plan') &&
+        READ_ONLY_TOOLS.has(tool as ToolName)
+      ) {
         return { allowed: true }
       }
 

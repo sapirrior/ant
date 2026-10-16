@@ -15,48 +15,48 @@ export interface ThemeColors {
 }
 
 export const DARK_THEME: ThemeColors = {
-  primary: [215, 119, 87],       // Warm brand orange #d77757
-  secondary: [177, 185, 249],     // Light blue-purple #b1b9f9
-  accent: [175, 135, 255],       // Electric violet #af87ff
-  error: [255, 107, 128],        // Bright red #ff6b80
-  warning: [255, 193, 7],        // Bright amber #ffc107
-  success: [78, 186, 101],       // Bright green #4eba65
-  info: [147, 165, 255],         // Medium blue
-  muted: [153, 153, 153],        // Inactive / muted gray
-  border: [80, 80, 80],          // Subtle border
+  primary: [215, 119, 87], // Warm brand orange #d77757
+  secondary: [177, 185, 249], // Light blue-purple #b1b9f9
+  accent: [175, 135, 255], // Electric violet #af87ff
+  error: [255, 107, 128], // Bright red #ff6b80
+  warning: [255, 193, 7], // Bright amber #ffc107
+  success: [78, 186, 101], // Bright green #4eba65
+  info: [147, 165, 255], // Medium blue
+  muted: [153, 153, 153], // Inactive / muted gray
+  border: [80, 80, 80], // Subtle border
   text: [255, 255, 255],
 }
 
 export const LIGHT_THEME: ThemeColors = {
-  primary: [215, 119, 87],       // Warm brand orange #d77757
-  secondary: [87, 105, 247],     // Medium blue
-  accent: [135, 0, 255],         // Electric violet
-  error: [171, 43, 63],          // Red
-  warning: [150, 108, 30],       // Amber
-  success: [44, 122, 57],        // Green
-  info: [87, 105, 247],          // Blue
-  muted: [102, 102, 102],        // Inactive gray
-  border: [175, 175, 175],       // Subtle gray
+  primary: [215, 119, 87], // Warm brand orange #d77757
+  secondary: [87, 105, 247], // Medium blue
+  accent: [135, 0, 255], // Electric violet
+  error: [171, 43, 63], // Red
+  warning: [150, 108, 30], // Amber
+  success: [44, 122, 57], // Green
+  info: [87, 105, 247], // Blue
+  muted: [102, 102, 102], // Inactive gray
+  border: [175, 175, 175], // Subtle gray
   text: [0, 0, 0],
 }
 
 // Standard 16-color ANSI mapping
 export const ANSI_16_MAP: Record<keyof ThemeColors, number> = {
-  primary: 33,   // yellow
+  primary: 33, // yellow
   secondary: 94, // bright blue
-  accent: 35,    // magenta
-  error: 31,     // red
-  warning: 93,   // bright yellow
-  success: 32,   // green
-  info: 36,      // cyan
-  muted: 90,     // bright black
+  accent: 35, // magenta
+  error: 31, // red
+  warning: 93, // bright yellow
+  success: 32, // green
+  info: 36, // cyan
+  muted: 90, // bright black
   border: 37,
-  text: 39,      // default
+  text: 39, // default
 }
 
 export function detectColorLevel(
   env: NodeJS.ProcessEnv = process.env,
-  isTTY: boolean = Boolean(process.stderr.isTTY)
+  isTTY: boolean = Boolean(process.stderr.isTTY),
 ): ColorLevel {
   const noColor = env.NO_COLOR
   if (noColor !== undefined && noColor !== '') return 0
@@ -82,7 +82,7 @@ export function detectColorLevel(
 
 export function resolveTheme(
   themeSetting: ThemeMode = 'auto',
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): ThemeColors {
   if (themeSetting === 'light') return LIGHT_THEME
   if (themeSetting === 'dark') return DARK_THEME
@@ -115,7 +115,7 @@ export function rgbToAnsi256(r: number, g: number, b: number): number {
 
 export function createColorFormatter(
   level: ColorLevel = detectColorLevel(),
-  themeMode: ThemeMode = 'auto'
+  themeMode: ThemeMode = 'auto',
 ) {
   const isAnsiTheme = themeMode === 'ansi'
   const theme = resolveTheme(themeMode)
@@ -223,4 +223,3 @@ export function getSymbols(unicode: boolean = detectUnicodeSupported()): Termina
 }
 
 export { formatDuration, formatTokens } from '../utils/format.ts'
-

@@ -14,7 +14,7 @@ import { pidAlive } from './process.ts'
 export async function withFileLock<T>(
   lockPath: string,
   fn: () => T | Promise<T>,
-  options?: { maxWaitMs?: number; name?: string }
+  options?: { maxWaitMs?: number; name?: string },
 ): Promise<T> {
   const maxWaitMs = options?.maxWaitMs ?? 5000
   const retryIntervalMs = 50
@@ -34,7 +34,12 @@ export async function withFileLock<T>(
       acquired = true
       break
     } catch (err: unknown) {
-      if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === 'EEXIST') {
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code: string }).code === 'EEXIST'
+      ) {
         try {
           const stats = statSync(lockPath)
           const age = Date.now() - stats.mtimeMs

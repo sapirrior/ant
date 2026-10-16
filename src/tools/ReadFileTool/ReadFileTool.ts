@@ -25,8 +25,14 @@ export function createReadFileTool(context: ToolExecutionContext) {
         const relPath = relToRoot(context.cwd, fullPath)
         const isExplicit = context.effectivePermissions?.check('ReadFile', relPath)?.isExplicitRule
 
-        if (isSensitivePath(fullPath) && context.effectivePermissions.mode !== 'bypassPermissions' && !isExplicit) {
-          throw new Error(`Access denied: reading sensitive file "${path}" requires explicit allow rule or bypass.`)
+        if (
+          isSensitivePath(fullPath) &&
+          context.effectivePermissions.mode !== 'bypassPermissions' &&
+          !isExplicit
+        ) {
+          throw new Error(
+            `Access denied: reading sensitive file "${path}" requires explicit allow rule or bypass.`,
+          )
         }
 
         if (!existsSync(fullPath)) {
@@ -61,9 +67,7 @@ export function createReadFileTool(context: ToolExecutionContext) {
           truncated = true
         }
 
-        let formatted = slicedLines
-          .map((line, idx) => `${startLine + idx + 1}: ${line}`)
-          .join('\n')
+        let formatted = slicedLines.map((line, idx) => `${startLine + idx + 1}: ${line}`).join('\n')
 
         if (formatted.length > 30000) {
           formatted = formatted.slice(0, 30000) + '\n... [output truncated at 30,000 characters]'
@@ -77,7 +81,9 @@ export function createReadFileTool(context: ToolExecutionContext) {
           linesReturned: slicedLines.length,
           content: formatted,
           truncated: truncated || undefined,
-          hint: truncated ? 'Use offset and limit parameters to inspect specific sections.' : undefined,
+          hint: truncated
+            ? 'Use offset and limit parameters to inspect specific sections.'
+            : undefined,
         }
       })
     },

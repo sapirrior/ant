@@ -10,15 +10,7 @@ import type {
   ToolName,
 } from '../constants/index.ts'
 
-export type {
-  LogLevel,
-  OutputFormat,
-  PermissionMode,
-  ReasoningEffort,
-  Status,
-  Theme,
-  ToolName,
-}
+export type { LogLevel, OutputFormat, PermissionMode, ReasoningEffort, Status, Theme, ToolName }
 
 export interface Config {
   readonly prompt?: string
@@ -97,7 +89,11 @@ export interface ModelRunOptions {
   readonly onCheckpoint?: (
     tool: string,
     toolCallId: string | undefined,
-    files: { path: string; before: import('../tools/fs.ts').FileSnapshot | null; after: import('../tools/fs.ts').FileSnapshot | null }[]
+    files: {
+      path: string
+      before: import('../tools/fs.ts').FileSnapshot | null
+      after: import('../tools/fs.ts').FileSnapshot | null
+    }[],
   ) => number
   readonly onEvent?: (event: RunEvent) => void
 }
@@ -118,7 +114,11 @@ export interface ToolExecutionContext {
   readonly onCheckpoint?: (
     tool: string,
     toolCallId: string | undefined,
-    files: { path: string; before: import('../tools/fs.ts').FileSnapshot | null; after: import('../tools/fs.ts').FileSnapshot | null }[]
+    files: {
+      path: string
+      before: import('../tools/fs.ts').FileSnapshot | null
+      after: import('../tools/fs.ts').FileSnapshot | null
+    }[],
   ) => number
 }
 

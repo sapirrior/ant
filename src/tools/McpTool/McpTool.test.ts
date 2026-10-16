@@ -19,25 +19,19 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     const tool = createMcpTool(mockContext)
 
     // Missing server on list_tools
-    const res1 = await (tool.execute as any)(
-      { action: 'list_tools' },
-      { messages: [] }
-    )
+    const res1 = await (tool.execute as any)({ action: 'list_tools' }, { messages: [] })
     expect(res1.ok).toBe(false)
     expect(res1.error).toContain('Missing required parameter "server"')
 
     // Missing server on call
-    const res2 = await (tool.execute as any)(
-      { action: 'call', tool: 'my_tool' },
-      { messages: [] }
-    )
+    const res2 = await (tool.execute as any)({ action: 'call', tool: 'my_tool' }, { messages: [] })
     expect(res2.ok).toBe(false)
     expect(res2.error).toContain('Missing required parameter "server"')
 
     // Missing tool on call
     const res3 = await (tool.execute as any)(
       { action: 'call', server: 'my_server' },
-      { messages: [] }
+      { messages: [] },
     )
     expect(res3.ok).toBe(false)
     expect(res3.error).toContain('Missing required parameter "tool"')
@@ -57,7 +51,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     const tool = createMcpTool(mockContext)
     const result = await (tool.execute as any)(
       { action: 'call', server: 'github', tool: 'delete_repo', args: { repo: 'test' } },
-      { messages: [] }
+      { messages: [] },
     )
 
     expect(result.ok).toBe(false)
@@ -86,7 +80,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     const tool = createMcpTool(mockContext)
     const result = await (tool.execute as any)(
       { action: 'call', server: 'github', tool: 'get_repo', args: { repo: 'test' } },
-      { messages: [] }
+      { messages: [] },
     )
 
     expect(result.ok).toBe(true)
@@ -113,7 +107,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     const tool = createMcpTool(mockContext)
     const result = await (tool.execute as any)(
       { action: 'call', server: 'github', tool: 'delete_repo' },
-      { messages: [] }
+      { messages: [] },
     )
 
     expect(result.ok).toBe(false)
@@ -133,7 +127,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     const tool = createMcpTool(mockContext)
     const result = await (tool.execute as any)(
       { action: 'list_servers' },
-      { messages: [], abortSignal: abortController.signal }
+      { messages: [], abortSignal: abortController.signal },
     )
 
     expect(result.ok).toBe(false)
@@ -142,7 +136,10 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
 
   it('supports glob allow and deny patterns per B-036', async () => {
     const fakeManager: any = {
-      callTool: async (server: string, t: string, _args: any) => ({ ok: true, output: { server, t } }),
+      callTool: async (server: string, t: string, _args: any) => ({
+        ok: true,
+        output: { server, t },
+      }),
     }
     const permissions = resolveEffectivePermissions({
       mode: 'default',
@@ -159,12 +156,18 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     const tool = createMcpTool(mockContext)
 
     // db/drop_table should be denied by db/drop_*
-    const resDenied = await (tool.execute as any)({ action: 'call', server: 'db', tool: 'drop_table' }, { messages: [] })
+    const resDenied = await (tool.execute as any)(
+      { action: 'call', server: 'db', tool: 'drop_table' },
+      { messages: [] },
+    )
     expect(resDenied.ok).toBe(false)
     expect(resDenied.error).toContain('Explicitly disallowed by rule')
 
     // x/read_file should be allowed by */read_*
-    const resAllowed = await (tool.execute as any)({ action: 'call', server: 'x', tool: 'read_file' }, { messages: [] })
+    const resAllowed = await (tool.execute as any)(
+      { action: 'call', server: 'x', tool: 'read_file' },
+      { messages: [] },
+    )
     expect(resAllowed.ok).toBe(true)
   })
 })

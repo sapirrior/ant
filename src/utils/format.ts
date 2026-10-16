@@ -61,7 +61,8 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 // Strips ANSI escape sequences and terminal control characters (C0, C1, DEL)
 // eslint-disable-next-line no-control-regex
-const CONTROL_OR_ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|[\x00-\x1f\x7f-\x9f]/g
+const CONTROL_OR_ANSI_RE =
+  /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|[\x00-\x1f\x7f-\x9f]/g
 
 /**
  * Removes terminal control/ANSI sequences from untrusted text, collapses newlines
@@ -100,4 +101,3 @@ export function collapseInline(text: string, maxWidth: number, ellipsis: string 
 
   return useEllipsis ? accumulated + ellipsis : accumulated
 }
-

@@ -91,7 +91,7 @@ export function registerUpdateCommand(program: Command): void {
         if (options.check) {
           if (isOutdated) {
             notice.info(
-              `A new version of ant is available: v${latestVersion} (current: v${currentVersion})\nRun ant update to upgrade.`
+              `A new version of ant is available: v${latestVersion} (current: v${currentVersion})\nRun ant update to upgrade.`,
             )
           } else {
             notice.done(`ant is up to date (v${currentVersion}).`)
@@ -118,7 +118,7 @@ export function registerUpdateCommand(program: Command): void {
         try {
           const checksumRes = await fetch(
             `https://github.com/${REPO}/releases/download/${latestTag}/checksums.txt`,
-            { signal: AbortSignal.timeout(15000) }
+            { signal: AbortSignal.timeout(15000) },
           )
           if (checksumRes.ok) {
             const checksumsText = await checksumRes.text()
@@ -135,7 +135,10 @@ export function registerUpdateCommand(program: Command): void {
             }
           }
         } catch (checksumErr) {
-          if (checksumErr instanceof Error && checksumErr.message.includes('Checksum verification failed')) {
+          if (
+            checksumErr instanceof Error &&
+            checksumErr.message.includes('Checksum verification failed')
+          ) {
             throw checksumErr
           }
         }
@@ -166,7 +169,9 @@ export function registerUpdateCommand(program: Command): void {
 
         // Run termux-fix-shebang if in Termux
         if (process.env.PREFIX && existsSync(`${process.env.PREFIX}/bin/termux-fix-shebang`)) {
-          spawnSync(`${process.env.PREFIX}/bin/termux-fix-shebang`, [targetBin], { stdio: 'ignore' })
+          spawnSync(`${process.env.PREFIX}/bin/termux-fix-shebang`, [targetBin], {
+            stdio: 'ignore',
+          })
         }
 
         notice.done(`Successfully updated ant to v${latestVersion}! (${targetBin})`)

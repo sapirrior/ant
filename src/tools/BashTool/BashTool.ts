@@ -9,8 +9,17 @@ import { BASH_DESCRIPTION } from './prompt.ts'
 
 export const bashInputSchema = z.object({
   command: z.string().describe('The command line string to execute in bash/sh.'),
-  timeoutMs: z.number().int().min(1000).max(600000).optional().describe('Hard timeout in ms before SIGTERM/SIGKILL (1000..600000).'),
-  background: z.boolean().optional().describe('Start in background immediately (skips foreground wait).'),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(1000)
+    .max(600000)
+    .optional()
+    .describe('Hard timeout in ms before SIGTERM/SIGKILL (1000..600000).'),
+  background: z
+    .boolean()
+    .optional()
+    .describe('Start in background immediately (skips foreground wait).'),
 })
 
 export function describeBash(input: z.infer<typeof bashInputSchema>): string {
@@ -66,7 +75,7 @@ export function createBashTool(context: ToolExecutionContext) {
     execute: async (input) => {
       return executeWithPolicy('Bash', input, context, async (args) => {
         const foregroundMs = context.foregroundMs ?? 10000
-        const backgroundEnabled = context.backgroundEnabled ?? (context.tasks !== undefined)
+        const backgroundEnabled = context.backgroundEnabled ?? context.tasks !== undefined
         const env = buildCleanEnv(context.passEnv)
 
         // Shell binary selection: check bash or fallback to sh
@@ -98,7 +107,9 @@ export function createBashTool(context: ToolExecutionContext) {
         try {
           await spawnPromise
         } catch (err) {
-          throw new Error(`Failed to spawn bash process: ${err instanceof Error ? err.message : String(err)}`)
+          throw new Error(
+            `Failed to spawn bash process: ${err instanceof Error ? err.message : String(err)}`,
+          )
         }
 
         const pid = child.pid!
@@ -133,16 +144,18 @@ export function createBashTool(context: ToolExecutionContext) {
         child.stdout?.on('data', appendStdout)
         child.stderr?.on('data', appendStderr)
 
-        const closePromise = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
-          child.on('close', (code, sig) => {
-            exitCode = code
-            exitSignal = sig
-            resolve({ code, signal: sig })
-          })
-          child.on('error', () => {
-            resolve({ code: 1, signal: null })
-          })
-        })
+        const closePromise = new Promise<{ code: number | null; signal: string | null }>(
+          (resolve) => {
+            child.on('close', (code, sig) => {
+              exitCode = code
+              exitSignal = sig
+              resolve({ code, signal: sig })
+            })
+            child.on('error', () => {
+              resolve({ code: 1, signal: null })
+            })
+          },
+        )
 
         // Process group kill helper
         const killGroup = (sig: NodeJS.Signals = 'SIGTERM') => {
@@ -199,7 +212,10 @@ export function createBashTool(context: ToolExecutionContext) {
           const waitResult = await Promise.race([
             closePromise.then((res) => ({ type: 'exit' as const, res })),
             new Promise<{ type: 'foreground_timeout' }>((resolve) => {
-              foregroundTimeoutHandle = setTimeout(() => resolve({ type: 'foreground_timeout' }), foregroundMs)
+              foregroundTimeoutHandle = setTimeout(
+                () => resolve({ type: 'foreground_timeout' }),
+                foregroundMs,
+              )
             }),
           ])
 
