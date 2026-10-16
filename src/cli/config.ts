@@ -3,6 +3,7 @@ import {
   getSettingsPath,
   getSettingsLockPath,
   loadSettings,
+  loadRawSettings,
   saveSettings,
   withFileLock,
   KEYS,
@@ -78,7 +79,7 @@ export function registerConfigCommand(program: Command): void {
       const lockPath = getSettingsLockPath()
       try {
         await withFileLock(lockPath, () => {
-          const current: Settings = loadSettings()
+          const current: Settings = loadRawSettings()
           keyDef.set(current, parsedVal)
           saveSettings(current)
         })
@@ -105,7 +106,7 @@ export function registerConfigCommand(program: Command): void {
       const lockPath = getSettingsLockPath()
       try {
         await withFileLock(lockPath, () => {
-          const current: Settings = loadSettings()
+          const current: Settings = loadRawSettings()
           keyDef.unset(current)
           saveSettings(current)
         })
@@ -114,6 +115,84 @@ export function registerConfigCommand(program: Command): void {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         notice.error(`Failed to unset setting: ${msg}`)
+        process.exitCode = 2
+      }
+    })
+
+  configCmd
+    .command('add <key> <value>')
+    .description('Add an item to an array setting (e.g. allowedTools, disallowedTools)')
+    .action(async (key: string, value: string) => {
+      const keyDef = KEYS[key]
+      if (!keyDef) {
+        notice.error(`Unknown setting "${key}".`)
+        process.exitCode = 2
+        return
+      }
+
+      const item = value.trim()
+      if (!item) {
+        notice.error('Value cannot be empty.')
+        process.exitCode = 2
+        return
+      }
+
+      const lockPath = getSettingsLockPath()
+      try {
+        await withFileLock(lockPath, () => {
+          const current: Settings = loadRawSettings()
+          const val = keyDef.get(current)
+          const list: string[] = Array.isArray(val) ? [...val] : []
+          if (!list.includes(item)) {
+            list.push(item)
+          }
+          keyDef.set(current, list)
+          saveSettings(current)
+        })
+        process.stdout.write(`Added "${item}" to ${key} in ${getSettingsPath()}\n`)
+        process.exitCode = 0
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        notice.error(`Failed to add to setting: ${msg}`)
+        process.exitCode = 2
+      }
+    })
+
+  configCmd
+    .command('remove <key> <value>')
+    .alias('rm')
+    .description('Remove an item from an array setting (e.g. allowedTools, disallowedTools)')
+    .action(async (key: string, value: string) => {
+      const keyDef = KEYS[key]
+      if (!keyDef) {
+        notice.error(`Unknown setting "${key}".`)
+        process.exitCode = 2
+        return
+      }
+
+      const item = value.trim()
+      if (!item) {
+        notice.error('Value cannot be empty.')
+        process.exitCode = 2
+        return
+      }
+
+      const lockPath = getSettingsLockPath()
+      try {
+        await withFileLock(lockPath, () => {
+          const current: Settings = loadRawSettings()
+          const val = keyDef.get(current)
+          if (Array.isArray(val)) {
+            const updated = val.filter((x) => x !== item)
+            keyDef.set(current, updated)
+            saveSettings(current)
+          }
+        })
+        process.stdout.write(`Removed "${item}" from ${key} in ${getSettingsPath()}\n`)
+        process.exitCode = 0
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        notice.error(`Failed to remove from setting: ${msg}`)
         process.exitCode = 2
       }
     })

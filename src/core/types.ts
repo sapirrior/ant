@@ -33,8 +33,6 @@ export interface Config {
   readonly continueLatest: boolean
   readonly resumeThreadId?: string
   readonly streamRetries?: number
-  readonly allowedMcp?: readonly string[]
-  readonly deniedMcp?: readonly string[]
   readonly bare?: boolean
   readonly noSessionPersistence?: boolean
   readonly verbose?: boolean
@@ -134,8 +132,6 @@ export interface ToolExecutionContext {
   readonly toolCallId?: string
   readonly tasks?: import('../tools/tasks.ts').TaskManagerRegistry
   readonly mcpManager?: import('../mcp/manager.ts').McpClientManager
-  readonly allowedMcpPatterns?: readonly string[]
-  readonly deniedMcpPatterns?: readonly string[]
   readonly backgroundEnabled?: boolean
   readonly foregroundMs?: number
   readonly passEnv?: string[]

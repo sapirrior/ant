@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import { createMcpTool } from './McpTool.ts'
 import type { ToolExecutionContext } from '../../core/types.ts'
-import { resolveEffectivePermissions } from '../../policy/toolPermissions.ts'
+import { parseToolRule, resolveEffectivePermissions } from '../../policy/toolPermissions.ts'
 
 describe('McpTool agent boundary (src/tools/McpTool)', () => {
-  const dummyEffectivePermissions = resolveEffectivePermissions({
+  const bypassPermissions = resolveEffectivePermissions({
     mode: 'bypassPermissions',
     allowedRules: [],
     disallowedRules: [],
@@ -13,7 +13,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
   it('validates required parameters and schema constraints', async () => {
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      effectivePermissions: dummyEffectivePermissions,
+      effectivePermissions: bypassPermissions,
     }
 
     const tool = createMcpTool(mockContext)
@@ -44,10 +44,14 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
   })
 
   it('rejects execution non-interactively when MCP tool requires explicit approval', async () => {
+    const defaultPermissions = resolveEffectivePermissions({
+      mode: 'default',
+      allowedRules: [],
+      disallowedRules: [],
+    })
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      effectivePermissions: dummyEffectivePermissions,
-      allowedMcpPatterns: [],
+      effectivePermissions: defaultPermissions,
     }
 
     const tool = createMcpTool(mockContext)
@@ -57,21 +61,26 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     )
 
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('Permission denied: MCP tool "github/delete_repo" requires explicit approval')
+    expect(result.error).toContain('Permission denied')
   })
 
-  it('allows execution without prompt when tool matches --allow-mcp pattern', async () => {
+  it('allows execution without prompt when tool matches McpTool(server/*) pattern', async () => {
     const fakeManager: any = {
       callTool: async (server: string, t: string, args: any) => {
         return { ok: true, output: { success: true, server, t, args } }
       },
     }
 
+    const scopedPermissions = resolveEffectivePermissions({
+      mode: 'default',
+      allowedRules: [parseToolRule('McpTool(github/*)')],
+      disallowedRules: [],
+    })
+
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      effectivePermissions: dummyEffectivePermissions,
+      effectivePermissions: scopedPermissions,
       mcpManager: fakeManager,
-      allowedMcpPatterns: ['github/*'],
     }
 
     const tool = createMcpTool(mockContext)
@@ -89,12 +98,16 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     })
   })
 
-  it('enforces --deny-mcp denial override even when allow wildcard is present', async () => {
+  it('enforces disallowed-tools override even when allow wildcard is present', async () => {
+    const permissions = resolveEffectivePermissions({
+      mode: 'default',
+      allowedRules: [parseToolRule('McpTool(*)')],
+      disallowedRules: [parseToolRule('McpTool(github/delete_repo)')],
+    })
+
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      effectivePermissions: dummyEffectivePermissions,
-      allowedMcpPatterns: ['*'], // allowed all
-      deniedMcpPatterns: ['github/delete_repo'], // but explicitly denied delete_repo
+      effectivePermissions: permissions,
     }
 
     const tool = createMcpTool(mockContext)
@@ -104,7 +117,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     )
 
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('denied by policy')
+    expect(result.error).toContain('Explicitly disallowed by rule')
   })
 
   it('aborts cleanly when signal is already aborted', async () => {
@@ -113,7 +126,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
 
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      effectivePermissions: dummyEffectivePermissions,
+      effectivePermissions: bypassPermissions,
       abortSignal: abortController.signal,
     }
 
@@ -131,12 +144,16 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     const fakeManager: any = {
       callTool: async (server: string, t: string, _args: any) => ({ ok: true, output: { server, t } }),
     }
+    const permissions = resolveEffectivePermissions({
+      mode: 'default',
+      allowedRules: [parseToolRule('McpTool(db/*)'), parseToolRule('McpTool(*/read_*)')],
+      disallowedRules: [parseToolRule('McpTool(db/drop_*)')],
+    })
+
     const mockContext: ToolExecutionContext = {
       cwd: process.cwd(),
-      effectivePermissions: dummyEffectivePermissions,
+      effectivePermissions: permissions,
       mcpManager: fakeManager,
-      allowedMcpPatterns: ['db/*', '*/read_*'],
-      deniedMcpPatterns: ['db/drop_*'],
     }
 
     const tool = createMcpTool(mockContext)
@@ -144,7 +161,7 @@ describe('McpTool agent boundary (src/tools/McpTool)', () => {
     // db/drop_table should be denied by db/drop_*
     const resDenied = await (tool.execute as any)({ action: 'call', server: 'db', tool: 'drop_table' }, { messages: [] })
     expect(resDenied.ok).toBe(false)
-    expect(resDenied.error).toContain('denied by policy')
+    expect(resDenied.error).toContain('Explicitly disallowed by rule')
 
     // x/read_file should be allowed by */read_*
     const resAllowed = await (tool.execute as any)({ action: 'call', server: 'x', tool: 'read_file' }, { messages: [] })

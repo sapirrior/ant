@@ -11,7 +11,7 @@ const MAX_SEARCH_LIMIT = 20
 const SEARCH_TIMEOUT_MS = 12000
 
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 (Steward/CLI)'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 (Ant/CLI)'
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -186,9 +186,10 @@ export async function executeWebSearch(
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS)
+  const onParentAbort = () => controller.abort()
 
   if (context?.abortSignal) {
-    context.abortSignal.addEventListener('abort', () => controller.abort(), { once: true })
+    context.abortSignal.addEventListener('abort', onParentAbort, { once: true })
   }
 
   try {
@@ -215,6 +216,9 @@ export async function executeWebSearch(
       html = await response.text()
     } finally {
       clearTimeout(timeoutId)
+      if (context?.abortSignal) {
+        context.abortSignal.removeEventListener('abort', onParentAbort)
+      }
     }
 
     if (

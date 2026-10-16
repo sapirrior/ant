@@ -5,7 +5,8 @@ export const MAX_STDIN_BYTES = 10 * 1024 * 1024 // 10 MiB limit
 export async function readPipedStdin(
   maxBytes: number = MAX_STDIN_BYTES,
   timeoutMs = process.env.ANT_STDIN_TIMEOUT ? Number.parseInt(process.env.ANT_STDIN_TIMEOUT, 10) : 0,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  hardTimeoutMs?: number
 ): Promise<string | undefined> {
   if (process.stdin.isTTY) {
     return undefined
@@ -28,13 +29,24 @@ export async function readPipedStdin(
 
   return new Promise<string | undefined>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined
+    let hardTimer: ReturnType<typeof setTimeout> | undefined
 
     const cleanup = () => {
       if (timer) clearTimeout(timer)
+      if (hardTimer) clearTimeout(hardTimer)
       process.stdin.pause()
       process.stdin.removeListener('data', onData)
       process.stdin.removeListener('end', onEnd)
       process.stdin.removeListener('error', onError)
+    }
+
+    if (hardTimeoutMs && hardTimeoutMs > 0) {
+      hardTimer = setTimeout(() => {
+        cleanup()
+        process.stdin.destroy()
+        reject(new Error('timed out waiting for piped stdin'))
+      }, hardTimeoutMs)
+      hardTimer.unref()
     }
 
     const resetIdleTimer = () => {

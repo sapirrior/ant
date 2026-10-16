@@ -176,14 +176,6 @@ export async function runAgent(
   const mcpManager = agentContext?.mcpManager
 
   const bashSettings = config.settings?.tools?.Bash
-  const allowedMcpPatterns = [
-    ...(config.allowedMcp ?? []),
-    ...(config.settings?.allow?.mcp ?? []),
-  ]
-  const deniedMcpPatterns = [
-    ...(config.deniedMcp ?? []),
-    ...(config.settings?.deny?.mcp ?? []),
-  ]
 
   const toolContext: ToolExecutionContext = {
     cwd: config.cwd,
@@ -193,8 +185,6 @@ export async function runAgent(
     threadId,
     tasks,
     mcpManager,
-    allowedMcpPatterns,
-    deniedMcpPatterns,
     backgroundEnabled: true,
     foregroundMs: bashSettings?.foregroundMs,
     passEnv: bashSettings?.passEnv,
@@ -235,6 +225,7 @@ export async function runAgent(
       onStepEnd: (step) => {
         stepsExecuted++
         const cachedTokens =
+          (step.usage as any)?.inputTokenDetails?.cacheReadTokens ??
           (step.usage as any)?.cachedPromptTokens ??
           (step.usage as any)?.cacheReadInputTokens ??
           undefined
@@ -248,10 +239,9 @@ export async function runAgent(
             }
           : undefined
 
-        // Persist only newly generated step messages
-        const allMessages = (step.response?.messages ?? []) as ModelMessage[]
-        const fresh = allMessages.slice(persistedCount)
-        persistedCount = allMessages.length
+        // In AI SDK v7, step.response.messages is per-step (not cumulative)
+        const fresh = (step.response?.messages ?? []) as ModelMessage[]
+        persistedCount += fresh.length
         if (fresh.length > 0) {
           agentContext?.onStepPersist?.(fresh, stepUsage, 1)
         }

@@ -97,16 +97,19 @@ export function createGrepTool(context: ToolExecutionContext) {
           throw new Error(`Invalid regex: ${err instanceof Error ? err.message : String(err)}`)
         }
 
+        const relPath = relToRoot(context.cwd, fullPath)
+        const isExplicit = context.effectivePermissions?.check('Grep', relPath)?.isExplicitRule
+        const allowSensitive = context.effectivePermissions.mode === 'bypassPermissions' || Boolean(isExplicit)
+
         const internalLimit = maxResults + 1
         const matches: GrepMatch[] = []
-        const allowSensitive = context.effectivePermissions.mode === 'bypassPermissions'
 
         const stats = statSync(fullPath)
         if (stats.isDirectory()) {
           await scanDirectory(fullPath, context.cwd, regex, matches, internalLimit, allowSensitive)
         } else {
           if (isSensitivePath(fullPath) && !allowSensitive) {
-            throw new Error(`Access denied: searching sensitive file "${path}" requires explicit sensitive authorization.`)
+            throw new Error(`Access denied: searching sensitive file "${path}" requires explicit allow rule or bypass.`)
           }
           if (stats.size > MAX_GREP_FILE_BYTES) {
             throw new Error(`File "${path}" is too large to grep (${Math.round(stats.size / (1024 * 1024))} MiB). Limit is 2 MiB.`)

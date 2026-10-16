@@ -21,11 +21,13 @@
       "type": "string",
       "enum": [
         "max_turns",
-        "timeout",
+        "truncated",
+        "empty_response",
+        "usage_error",
         "model_error",
-        "auth_error",
-        "cancelled",
-        "internal_error"
+        "timeout",
+        "internal_error",
+        "cancelled"
       ],
       "example": "max_turns"
     },

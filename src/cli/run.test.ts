@@ -36,14 +36,14 @@ describe('CLI run command contract', () => {
     process.exitCode = 0
   })
 
-  it('rejects bare prompt without -p or --print', async () => {
+  it('accepts positional prompt without -p or --print', async () => {
     const program = createProgram()
     try {
       await program.parseAsync(['node', 'ant', 'Explain this code'])
     } catch {}
 
-    expect(process.exitCode).toBe(2)
-    expect(stderrBuf).toContain('ant requires -p/--print to run in print mode')
+    // It should not fail with "ant requires -p/--print"
+    expect(stderrBuf).not.toContain('ant requires -p/--print')
   })
 
   it('rejects whitespace-only prompt', async () => {
@@ -84,14 +84,34 @@ describe('CLI run command contract', () => {
     expect(stderrBuf).toContain("unknown option '--input-format=stream-json'")
   })
 
-  it('rejects permission-mode auto', async () => {
+  it('rejects permission-mode dontAsk', async () => {
+    const program = createProgram()
+    try {
+      await program.parseAsync(['node', 'ant', '-p', '--permission-mode', 'dontAsk', 'hello'])
+    } catch {}
+
+    expect(process.exitCode).toBe(2)
+    expect(stderrBuf).toContain('Permission mode "dontAsk" is not supported')
+  })
+
+  it('rejects invalid permission-mode', async () => {
+    const program = createProgram()
+    try {
+      await program.parseAsync(['node', 'ant', '-p', '--permission-mode', 'invalid_mode', 'hello'])
+    } catch {}
+
+    expect(process.exitCode).toBe(2)
+    expect(stderrBuf).toContain('Invalid permission-mode: "invalid_mode"')
+  })
+
+  it('rejects permission-mode auto as invalid', async () => {
     const program = createProgram()
     try {
       await program.parseAsync(['node', 'ant', '-p', '--permission-mode', 'auto', 'hello'])
     } catch {}
 
     expect(process.exitCode).toBe(2)
-    expect(stderrBuf).toContain('Permission mode "auto" is not supported')
+    expect(stderrBuf).toContain('Invalid permission-mode: "auto"')
   })
 
   it('dispatches to subcommands rather than interpreting them as prompts', () => {

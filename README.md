@@ -6,12 +6,12 @@
 
 *Terminal-native. Model-agnostic. Headless by design. Instant time-travel rollback.*
 
-[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg?style=flat-square)](package.json)
-[![Runtime](https://img.shields.io/badge/runtime-Bun%20%7C%20Node-black.svg?style=flat-square)](https://bun.sh)
+[![Version](https://img.shields.io/badge/version-0.10.0-blue.svg?style=flat-square)](package.json)
+[![Runtime](https://img.shields.io/badge/runtime-Bun%20Only-black.svg?style=flat-square)](https://bun.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 
 ```bash
-git diff | ant -p "Review this patch for edge cases and regressions"
+git diff | ant "Review this patch for edge cases and regressions"
 ```
 
 </div>
@@ -48,7 +48,7 @@ No interactive prompts. No `/dev/tty` blocking. Just pure terminal autonomy.
 ```
 
 ### 1. 🖨️ True Print-Native Execution
-Canonical `ant -p "..."` headless execution. Feed it a task, stream results in real time, and let your scripts inspect standard POSIX exit codes (`0` for success, non-zero for failures). Perfect for local CLI aliases, git hooks, and unattended CI/CD runners.
+Feed it a prompt directly (`ant "Fix auth bug"` or `ant -p "Fix auth bug"`), stream results in real time, and let your scripts inspect standard POSIX exit codes (`0` for success, non-zero for failures). `-p/--print` is supported for backward compatibility, but optional—positional prompts run immediately. Perfect for local CLI aliases, git hooks, and unattended CI/CD runners.
 
 ### 2. ⏪ Time-Travel Checkpoints (Instant Undo)
 Never worry about an autonomous agent corrupting your codebase. Before modifying, creating, or deleting a file, `ant` creates content-addressed snapshots in a lightweight local SQLite store. If an edit wasn't what you wanted, preview and rewind instantly:
@@ -67,10 +67,10 @@ Switch models with a single flag. Powered by the Vercel AI SDK, `ant` comes out 
 
 ### 4. 🛡️ Deterministic Permission Policies
 Unattended runs should never hang waiting for a human to press `[y/N]`. Tool access is governed by strict, declarative modes:
-* `default` — Safe read-only inspection. Mutations denied without explicit rule.
-* `acceptEdits` — Auto-approves workspace file edits; isolates shell commands.
+* `default` — Safe read-only inspection. Workspace file edits and Bash commands require explicit allow rules.
+* `acceptEdits` — Auto-approves workspace file edits (`WriteFile`, `EditFile`, `DeleteFile`); isolates shell commands.
 * `plan` — Pure reconnaissance; mutating tools are hidden from the model.
-* `bypassPermissions` — Full autonomous execution for sandboxed environments.
+* `bypassPermissions` — Full autonomous execution (can still be bounded with `--disallowed-tools`).
 
 ### 5. 🔄 Resumable Sessions & Context Continuation
 Continue a multi-turn conversation thread seamlessly (`ant -p -c "Now write unit tests"`), swap the model mid-session, or run fully ephemeral runs with `--no-session-persistence`.
@@ -115,13 +115,55 @@ ant config set model ollama/llama3
 
 ```bash
 # Ask questions directly (rendered Markdown in terminal, plain text in pipes)
-ant -p "Explain the design patterns used in src/core"
+ant "Explain the design patterns used in src/core"
 
 # Autonomous coding with safe file edits
-ant -p "Refactor src/utils/format.ts to export visibleWidth" --permission-mode acceptEdits
+ant "Refactor src/utils/format.ts to export visibleWidth" --permission-mode acceptEdits
 
 # Allow specific shell test commands
-ant -p "Fix the failing test in agent.test.ts" --permission-mode acceptEdits --allowed-tools "Bash(bun test *)"
+ant "Fix the failing test in agent.test.ts" --permission-mode acceptEdits --allowed-tools "Bash(bun test *)"
+```
+
+---
+
+## 🛡️ Declarative Permission System
+
+In `ant`, tool security is governed by a single, transparent declarative permission system. There are no hidden classifiers or unexpected prompts.
+
+### Evaluation Order (Deterministic)
+1. **Disallowed Rules (`--disallowed-tools`)**: If any deny rule matches, the tool is immediately **denied**. Deny rules always win, even over `--dangerously-skip-permissions`.
+2. **Bypass Mode (`bypassPermissions`)**: If `--dangerously-skip-permissions` is active, the tool is allowed.
+3. **Allowed Rules (`--allowed-tools`)**: If an explicit allow rule matches, the tool is allowed.
+4. **Mode Defaults**:
+   - `default`: Read-only tools (`ReadFile`, `ListDir`, `Grep`, `WebSearch`, `WebFetch`) and `TaskManager` are allowed. Edits and Bash require explicit rules.
+   - `acceptEdits`: Local workspace file mutations (`WriteFile`, `EditFile`, `DeleteFile`) are also auto-approved. Shell commands require explicit rules.
+   - `plan`: Pure reconnaissance mode. Mutating tools are hidden from the model.
+5. **Deny with Actionable Fix**: If no rule or mode default permits the tool, it is denied with a message telling you the exact rule needed:
+   `"Permission denied: Bash(git status) not allowed in mode default. Allow with --allowed-tools 'Bash(git status)'."`
+
+### Pattern Syntax
+| Tool | Target Matched | Pattern Syntax | Examples |
+| :--- | :--- | :--- | :--- |
+| `Bash` | Command string | Token-boundary prefix matching. **Compound chaining (`; & \| \n \` $()` is strictly rejected** on scoped allow rules. | `Bash(git *)`, `Bash(bun test *)`, `Bash(ant --version)` |
+| Filesystem (`ReadFile`, `WriteFile`, `EditFile`, `DeleteFile`, `Grep`) | POSIX path normalized relative to workspace root | High-performance `Bun.Glob`. `*` matches files in root directory; `**` matches recursively. Sensitive files (`.env`, `id_rsa`) require explicit rules. | `ReadFile(*)`, `WriteFile(src/**/*)`, `EditFile(*.json)`, `ReadFile(.env)` |
+| `WebFetch` | URL hostname | Glob match on hostname. Private/loopback IPs (SSRF) strictly prohibited. | `WebFetch(*.github.com)`, `WebFetch(bun.sh)` |
+| `McpTool` | `server/tool` | Glob match on server name and tool name. | `McpTool(github/*)`, `McpTool(context7/get_*)` |
+
+### Managing Persistent Rules
+You can manage permissions in `~/.ant/settings.json` using the `ant config` subcommands:
+```bash
+# Add a rule to the allowed list
+ant config add allowedTools "Bash(git *)"
+ant config add allowedTools "Bash(bun test *)"
+
+# Remove a specific rule
+ant config remove allowedTools "Bash(git *)"
+
+# Deny dangerous commands permanently
+ant config add disallowedTools "Bash(rm *)"
+
+# Clear all rules
+ant config unset allowedTools
 ```
 
 ---
@@ -130,29 +172,29 @@ ant -p "Fix the failing test in agent.test.ts" --permission-mode acceptEdits --a
 
 ### 🔍 Pipe Git Diffs for Instant Code Review
 ```bash
-git diff main | ant -p "Review this patch for memory leaks, performance bugs, and edge cases"
+git diff main | ant "Review this patch for memory leaks, performance bugs, and edge cases"
 ```
 
 ### 📊 Extract Structured JSON for CI Automation
 ```bash
-ant -p "List all exported functions in src/tools/index.ts" -o json | jq -r '.result'
+ant "List all exported functions in src/tools/index.ts" -o json | jq -r '.result'
 ```
 
 ### ⚡ Stream Real-Time NDJSON Events
 ```bash
-ant -p "Build project and inspect compiler output" -o stream-json | grep --line-buffered '"type":"tool-call"'
+ant "Build project and inspect compiler output" -o stream-json | grep --line-buffered '"type":"tool-call"'
 ```
 
 ### 🔄 Multi-turn Iteration
 ```bash
 # Start a task
-ant -p "Inspect package.json and identify dependencies that have major version bumps"
+ant "Inspect package.json and identify dependencies that have major version bumps"
 
 # Follow up in the same thread
-ant -p -c "Which of those major updates introduce breaking changes?"
+ant -c "Which of those major updates introduce breaking changes?"
 
 # Resume any past session by ID
-ant -p -r th_1792139027_b1efa8d0 "Let's begin upgrading the first package"
+ant -r th_1792139027_b1efa8d0 "Let's begin upgrading the first package"
 ```
 
 ### ⏪ Checkpoint Rewind (Undo Mistakes)
@@ -177,12 +219,12 @@ Usage: ant [options] [prompt]
 The post-modern autonomous print agent
 
 Arguments:
-  prompt                                Instruction prompt for the agent
+  prompt                                Instruction prompt for the agent (optional; runs immediately)
 
 Options:
-  -p, --print                           Run non-interactively in print mode
-  --permission-mode <mode>              default | plan | acceptEdits | dontAsk | bypassPermissions
-  --allowed-tools <rule>                Allow tool rule (e.g. "Bash", "Bash(git diff *)")
+  -p, --print                           Run non-interactively in print mode (optional)
+  --permission-mode <mode>              default | plan | acceptEdits | bypassPermissions
+  --allowed-tools <rule>                Allow tool rule (e.g. "Bash(git *)", "WriteFile(src/*)")
   --disallowed-tools <rule>             Deny tool rule (overrides allow rules)
   --dangerously-skip-permissions        Bypass all tool permission checks
   --tools <names>                       Filter exposed tools (e.g. "default" or "ReadFile,EditFile")
@@ -190,7 +232,7 @@ Options:
   -m, --model <provider/model-id>       Model override (e.g. google/gemini-2.5-flash)
   -s, --max-turns <number>              Maximum interaction turns before stopping (default: 30)
   -t, --timeout <duration>              Wall-clock timeout e.g. "30m", "10s" (default: 30m)
-  -e, --effort <level>                  Reasoning effort: none | low | medium | high | max
+  -e, --effort <level>                  Reasoning effort: none | minimal | low | medium | high | xhigh | max
   --bare                                Suppress ambient ~/.ant/settings.json and project MCP
   --no-session-persistence             Run ephemerally without saving history or snapshots
   -c, --continue                        Continue the latest conversation thread

@@ -9,6 +9,7 @@ import {
   KEYS,
   withFileLock,
   getSettingsLockPath,
+  VALID_REASONING,
   type Settings,
 } from './settings.ts'
 
@@ -46,14 +47,14 @@ describe('settings module', () => {
       model: 'google/gemini-2.5-flash',
       maxSteps: 25,
       timeout: '15m',
-      allow: { read: true, edit: false },
+      allowedTools: ['Bash(bun test *)'],
     }
     saveSettings(s)
     const loaded = loadSettings()
     expect(loaded.model).toBe('google/gemini-2.5-flash')
     expect(loaded.maxSteps).toBe(25)
     expect(loaded.timeout).toBe('15m')
-    expect(loaded.allow?.read).toBe(true)
+    expect(loaded.allowedTools).toEqual(['Bash(bun test *)'])
   })
 
   it('fails with clear error on malformed JSON', () => {
@@ -80,15 +81,21 @@ describe('settings module', () => {
     expect(KEYS['output']!.parse('stream-json')).toBe('stream-json')
     expect(() => KEYS['output']!.parse('yaml')).toThrow(/must be "text", "md", "json", or "stream-json"/)
 
-    expect(KEYS['reasoning']!.parse('low')).toBe('low')
-    expect(KEYS['reasoning']!.parse('max')).toBe('max')
+    for (const val of VALID_REASONING) {
+      expect(KEYS['reasoning']!.parse(val)).toBe(val)
+    }
     expect(KEYS['reasoning']!.parse('default')).toBe('provider-default')
-    expect(KEYS['effort']!.parse('minimal')).toBe('minimal')
     expect(() => KEYS['reasoning']!.parse('super-high')).toThrow(/must be one of/)
 
-    expect(KEYS['allow.read']!.parse('true')).toBe(true)
-    expect(KEYS['allow.read']!.parse('false')).toBe(false)
-    expect(() => KEYS['allow.read']!.parse('yes')).toThrow(/must be true or false/)
+    expect(KEYS['permissionMode']!.parse('default')).toBe('default')
+    expect(KEYS['permissionMode']!.parse('plan')).toBe('plan')
+    expect(KEYS['permissionMode']!.parse('acceptEdits')).toBe('acceptEdits')
+    expect(KEYS['permissionMode']!.parse('bypassPermissions')).toBe('bypassPermissions')
+    expect(() => KEYS['permissionMode']!.parse('auto')).toThrow(/must be/)
+    expect(() => KEYS['permissionMode']!.parse('invalid')).toThrow(/must be/)
+
+    expect(KEYS['allowedTools']!.parse('Bash, ReadFile')).toEqual(['Bash', 'ReadFile'])
+    expect(KEYS['disallowedTools']!.parse('Bash(rm *)')).toEqual(['Bash(rm *)'])
   })
 
   it('survives concurrent writes with withFileLock', async () => {
@@ -105,7 +112,7 @@ describe('settings module', () => {
     expect(existsSync(join(testHome, 'settings.json'))).toBe(true)
   })
 
-  it('recognizes reasoning and effort without warning (B1 fix)', () => {
+  it('recognizes reasoning and effort without warning', () => {
     const settingsPath = join(testHome, 'settings.json')
     writeFileSync(settingsPath, JSON.stringify({ reasoning: 'high', effort: 'medium' }), 'utf-8')
     const warnings: string[] = []
@@ -114,40 +121,14 @@ describe('settings module', () => {
     expect(warnings.length).toBe(0)
   })
 
-  it('routes warnings through custom warn callback when present', () => {
+  it('routes warnings through custom warn callback and warns on deprecated allow/deny', () => {
     const settingsPath = join(testHome, 'settings.json')
-    writeFileSync(settingsPath, JSON.stringify({ invalidRandomKey: 123 }), 'utf-8')
+    writeFileSync(settingsPath, JSON.stringify({ allow: { read: true }, deny: { mcp: [] }, invalidRandomKey: 123 }), 'utf-8')
     const warnings: string[] = []
     loadSettings({ warn: (w) => warnings.push(w) })
-    expect(warnings.length).toBe(1)
-    expect(warnings[0]).toContain('invalidRandomKey')
-  })
-
-  it('correctly sets, gets, and unsets allow.mcp and deny.mcp in KEYS table', () => {
-    const s: Settings = {}
-    KEYS['allow.mcp']!.set(s, ['git/*', 'db/query'])
-    expect(s.allow?.mcp).toEqual(['git/*', 'db/query'])
-    expect(KEYS['allow.mcp']!.get(s)).toEqual(['git/*', 'db/query'])
-
-    KEYS['allow.mcp']!.unset(s)
-    expect(s.allow?.mcp).toBeUndefined()
-
-    KEYS['deny.mcp']!.set(s, ['git/delete_repo'])
-    expect(s.deny?.mcp).toEqual(['git/delete_repo'])
-    expect(KEYS['deny.mcp']!.get(s)).toEqual(['git/delete_repo'])
-
-    KEYS['deny.mcp']!.unset(s)
-    expect(s.deny?.mcp).toBeUndefined()
-
-    // Test parser for comma-separated and JSON string
-    expect(KEYS['allow.mcp']!.parse('server/a, server/b')).toEqual(['server/a', 'server/b'])
-    expect(KEYS['deny.mcp']!.parse('["server/x", "server/y"]')).toEqual(['server/x', 'server/y'])
-  })
-
-  it('throws when settings values are malformed or string booleans (B-014)', () => {
-    const settingsPath = join(testHome, 'settings.json')
-    writeFileSync(settingsPath, JSON.stringify({ allow: { bash: 'false' } }), 'utf-8')
-    expect(() => loadSettings()).toThrow(/allow\.bash/)
+    expect(warnings.some((w) => w.includes('invalidRandomKey'))).toBe(true)
+    expect(warnings.some((w) => w.includes('ignoring deprecated setting "allow"'))).toBe(true)
+    expect(warnings.some((w) => w.includes('ignoring deprecated setting "deny"'))).toBe(true)
   })
 
   it('keeps output unset by default when settings file exists', () => {

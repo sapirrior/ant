@@ -7,6 +7,17 @@ import type { ReasoningEffort } from './core/types.ts'
 
 export type { ReasoningEffort }
 
+export const VALID_REASONING = [
+  'provider-default',
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const
+
 export const toolSettingsSchema = z.strictObject({
   enabled: z.boolean().optional(),
   foregroundMs: z.number().int().positive().optional(),
@@ -17,29 +28,20 @@ export const settingsSchema = z.object({
   model: z.string().optional(),
   maxTurns: z.number().int().min(1).optional(),
   maxSteps: z.number().int().min(1).optional(),
-  timeout: z.union([z.string(), z.number().int().min(0)]).optional(),
+  timeout: z.string().optional(),
   retries: z.number().int().min(0).optional(),
   streamRetries: z.number().int().min(0).optional(),
   outputFormat: z.enum(['text', 'md', 'json', 'stream-json']).optional(),
   output: z.enum(['text', 'md', 'json', 'stream-json']).optional(),
-  reasoning: z.enum(['none', 'low', 'medium', 'high', 'max']).optional(),
-  effort: z.enum(['none', 'low', 'medium', 'high', 'max']).optional(),
+  reasoning: z.enum(VALID_REASONING).optional(),
+  effort: z.enum(VALID_REASONING).optional(),
   logLevel: z.enum(['error', 'info', 'debug']).optional(),
   theme: z.enum(['auto', 'dark', 'light', 'ansi']).optional(),
-  permissionMode: z.enum(['default', 'plan', 'acceptEdits', 'dontAsk', 'bypassPermissions']).optional(),
+  permissionMode: z.enum(['default', 'plan', 'acceptEdits', 'bypassPermissions']).optional(),
   allowedTools: z.array(z.string()).optional(),
   disallowedTools: z.array(z.string()).optional(),
-  allow: z.strictObject({
-    read: z.boolean().optional(),
-    edit: z.boolean().optional(),
-    bash: z.boolean().optional(),
-    destructiveBash: z.boolean().optional(),
-    sensitive: z.boolean().optional(),
-    mcp: z.array(z.string()).optional(),
-  }).optional(),
-  deny: z.strictObject({
-    mcp: z.array(z.string()).optional(),
-  }).optional(),
+  allow: z.any().optional(),
+  deny: z.any().optional(),
   tools: z.record(z.string(), toolSettingsSchema).optional(),
 })
 
@@ -59,43 +61,24 @@ export interface Settings {
   outputFormat?: 'text' | 'md' | 'json' | 'stream-json'
   output?: 'text' | 'md' | 'json' | 'stream-json'
   reasoning?: ReasoningEffort
+  effort?: ReasoningEffort
   logLevel?: 'error' | 'info' | 'debug'
   theme?: 'auto' | 'dark' | 'light' | 'ansi'
-  permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'dontAsk' | 'bypassPermissions'
+  permissionMode?: import('./policy/toolPermissions.ts').PermissionMode
   allowedTools?: string[]
   disallowedTools?: string[]
-  allow?: {
-    read?: boolean
-    edit?: boolean
-    bash?: boolean
-    destructiveBash?: boolean
-    sensitive?: boolean
-    mcp?: string[]
-  }
-  deny?: {
-    mcp?: string[]
-  }
+  allow?: Record<string, unknown>
+  deny?: Record<string, unknown>
   tools?: Record<string, ToolSettings>
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   maxTurns: 30,
-  maxSteps: 30,
   timeout: '30m',
   retries: 4,
   streamRetries: 1,
   logLevel: 'info',
   theme: 'auto',
-  allow: {
-    read: false,
-    edit: false,
-    bash: false,
-    destructiveBash: false,
-    mcp: [],
-  },
-  deny: {
-    mcp: [],
-  },
   tools: {
     ReadFile: { enabled: true },
     ListDir: { enabled: true },
@@ -112,6 +95,9 @@ export const DEFAULT_SETTINGS: Settings = {
 }
 
 export function parseDurationMs(durationStr: string): number {
+  if (typeof durationStr !== 'string') {
+    throw new Error(`Invalid duration format: "${durationStr}". Must be a string.`)
+  }
   const trimmed = durationStr.trim().toLowerCase()
   if (/^\d+$/.test(trimmed)) {
     const ms = Number.parseInt(trimmed, 10)
@@ -165,6 +151,44 @@ export interface LoadSettingsOptions {
   warn?: (message: string) => void
 }
 
+export function loadRawSettings(): Settings {
+  const path = getSettingsPath()
+  if (!existsSync(path)) {
+    return {}
+  }
+
+  let raw: string
+  try {
+    raw = readFileSync(path, 'utf-8')
+  } catch (err) {
+    throw new Error(`Failed to read settings from ${path}: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`Settings file at ${path} is malformed JSON: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Settings file at ${path} must contain a JSON object.`)
+  }
+
+  const validation = settingsSchema.safeParse(parsed)
+  if (!validation.success) {
+    const issue = validation.error.issues[0]
+    const pathStr = issue?.path.join('.') || 'root'
+    throw new Error(`Invalid settings in ${path}: "${pathStr}" ${issue?.message}`)
+  }
+
+  const validated = validation.data as Settings
+  if (validation.data.effort && !validated.reasoning) {
+    validated.reasoning = validation.data.effort
+  }
+  return validated
+}
+
 export function loadSettings(options?: LoadSettingsOptions): Settings {
   const path = getSettingsPath()
   if (!existsSync(path)) {
@@ -197,6 +221,13 @@ export function loadSettings(options?: LoadSettingsOptions): Settings {
     }
   }
 
+  if (parsed.allow !== undefined) {
+    warnFn('ignoring deprecated setting "allow"')
+  }
+  if (parsed.deny !== undefined) {
+    warnFn('ignoring deprecated setting "deny"')
+  }
+
   const validation = settingsSchema.safeParse(parsed)
   if (!validation.success) {
     const issue = validation.error.issues[0]
@@ -212,14 +243,6 @@ export function loadSettings(options?: LoadSettingsOptions): Settings {
   return {
     ...DEFAULT_SETTINGS,
     ...validated,
-    allow: {
-      ...DEFAULT_SETTINGS.allow,
-      ...validated.allow,
-    },
-    deny: {
-      ...DEFAULT_SETTINGS.deny,
-      ...validated.deny,
-    },
     tools: {
       ...DEFAULT_SETTINGS.tools,
       ...validated.tools,
@@ -268,21 +291,10 @@ function parsePositiveInt(val: string, keyName: string): number {
   return n
 }
 
-export const VALID_REASONING: readonly ReasoningEffort[] = [
-  'provider-default',
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-]
-
 export function parseReasoning(val: string): ReasoningEffort {
   const norm = val.trim().toLowerCase()
   if (norm === 'default') return 'provider-default'
-  if (VALID_REASONING.includes(norm as ReasoningEffort)) {
+  if (VALID_REASONING.includes(norm as (typeof VALID_REASONING)[number])) {
     return norm as ReasoningEffort
   }
   throw new Error(
@@ -313,7 +325,7 @@ export const KEYS: Record<string, KeyDefinition> = {
     get: (s) => s.maxTurns ?? s.maxSteps,
     set: (s, v) => {
       s.maxTurns = v as number
-      s.maxSteps = v as number
+      delete s.maxSteps
     },
     unset: (s) => {
       delete s.maxTurns
@@ -327,7 +339,7 @@ export const KEYS: Record<string, KeyDefinition> = {
     get: (s) => s.maxTurns ?? s.maxSteps,
     set: (s, v) => {
       s.maxTurns = v as number
-      s.maxSteps = v as number
+      delete s.maxSteps
     },
     unset: (s) => {
       delete s.maxTurns
@@ -385,7 +397,7 @@ export const KEYS: Record<string, KeyDefinition> = {
     get: (s) => s.outputFormat ?? s.output,
     set: (s, v) => {
       s.outputFormat = v as 'text' | 'md' | 'json' | 'stream-json'
-      s.output = v as 'text' | 'md' | 'json' | 'stream-json'
+      delete s.output
     },
     unset: (s) => {
       delete s.outputFormat
@@ -404,7 +416,7 @@ export const KEYS: Record<string, KeyDefinition> = {
     get: (s) => s.outputFormat ?? s.output,
     set: (s, v) => {
       s.outputFormat = v as 'text' | 'md' | 'json' | 'stream-json'
-      s.output = v as 'text' | 'md' | 'json' | 'stream-json'
+      delete s.output
     },
     unset: (s) => {
       delete s.outputFormat
@@ -442,119 +454,57 @@ export const KEYS: Record<string, KeyDefinition> = {
     describe: 'Reasoning effort: provider-default | none | minimal | low | medium | high | xhigh | max',
     parse: parseReasoning,
     get: (s) => s.reasoning,
-    set: (s, v) => { s.reasoning = v as ReasoningEffort },
-    unset: (s) => { delete s.reasoning },
+    set: (s, v) => {
+      s.reasoning = v as ReasoningEffort
+      delete s.effort
+    },
+    unset: (s) => {
+      delete s.reasoning
+      delete s.effort
+    },
   },
   effort: {
     key: 'effort',
     describe: 'Alias for reasoning effort',
     parse: parseReasoning,
     get: (s) => s.reasoning,
-    set: (s, v) => { s.reasoning = v as ReasoningEffort },
-    unset: (s) => { delete s.reasoning },
-  },
-  'allow.read': {
-    key: 'allow.read',
-    describe: 'Allow file reading by default (true/false)',
-    parse: (v) => parseBool(v, 'allow.read'),
-    get: (s) => s.allow?.read,
     set: (s, v) => {
-      s.allow = s.allow ?? {}
-      s.allow.read = v as boolean
+      s.reasoning = v as ReasoningEffort
+      delete s.effort
     },
     unset: (s) => {
-      if (s.allow) delete s.allow.read
+      delete s.reasoning
+      delete s.effort
     },
   },
-  'allow.edit': {
-    key: 'allow.edit',
-    describe: 'Allow file editing and writing by default (true/false)',
-    parse: (v) => parseBool(v, 'allow.edit'),
-    get: (s) => s.allow?.edit,
-    set: (s, v) => {
-      s.allow = s.allow ?? {}
-      s.allow.edit = v as boolean
-    },
-    unset: (s) => {
-      if (s.allow) delete s.allow.edit
-    },
-  },
-  'allow.bash': {
-    key: 'allow.bash',
-    describe: 'Allow bash execution by default (true/false)',
-    parse: (v) => parseBool(v, 'allow.bash'),
-    get: (s) => s.allow?.bash,
-    set: (s, v) => {
-      s.allow = s.allow ?? {}
-      s.allow.bash = v as boolean
-    },
-    unset: (s) => {
-      if (s.allow) delete s.allow.bash
-    },
-  },
-  'allow.destructiveBash': {
-    key: 'allow.destructiveBash',
-    describe: 'Allow unprompted destructive bash execution by default (true/false)',
-    parse: (v) => parseBool(v, 'allow.destructiveBash'),
-    get: (s) => s.allow?.destructiveBash,
-    set: (s, v) => {
-      s.allow = s.allow ?? {}
-      s.allow.destructiveBash = v as boolean
-    },
-    unset: (s) => {
-      if (s.allow) delete s.allow.destructiveBash
-    },
-  },
-  'allow.sensitive': {
-    key: 'allow.sensitive',
-    describe: 'Allow reading sensitive files by default (true/false)',
-    parse: (v) => parseBool(v, 'allow.sensitive'),
-    get: (s) => s.allow?.sensitive,
-    set: (s, v) => {
-      s.allow = s.allow ?? {}
-      s.allow.sensitive = v as boolean
-    },
-    unset: (s) => {
-      if (s.allow) delete s.allow.sensitive
-    },
-  },
-  'allow.mcp': {
-    key: 'allow.mcp',
-    describe: 'Pre-allowed MCP tools list/patterns (comma-separated or JSON array)',
+  permissionMode: {
+    key: 'permissionMode',
+    describe: 'Permission mode: default | plan | acceptEdits | bypassPermissions',
     parse: (v) => {
-      const trimmed = v.trim()
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        return JSON.parse(trimmed)
+      if (v !== 'default' && v !== 'plan' && v !== 'acceptEdits' && v !== 'bypassPermissions') {
+        throw new Error(`Setting "permissionMode" must be "default", "plan", "acceptEdits", or "bypassPermissions" (got "${v}")`)
       }
-      return trimmed.split(',').map((x) => x.trim()).filter(Boolean)
+      return v
     },
-    get: (s) => s.allow?.mcp,
-    set: (s, v) => {
-      s.allow = s.allow ?? {}
-      s.allow.mcp = v as string[]
-    },
-    unset: (s) => {
-      if (s.allow) delete s.allow.mcp
-    },
+    get: (s) => s.permissionMode,
+    set: (s, v) => { s.permissionMode = v as 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions' },
+    unset: (s) => { delete s.permissionMode },
   },
-  'deny.mcp': {
-    key: 'deny.mcp',
-    describe: 'Denied MCP tools list/patterns (comma-separated or JSON array)',
-    parse: (v) => {
-      const trimmed = v.trim()
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        return JSON.parse(trimmed)
-      }
-      return trimmed.split(',').map((x) => x.trim()).filter(Boolean)
-    },
-    get: (s) => s.deny?.mcp,
-    set: (s, v) => {
-      s.deny = s.deny ?? {}
-      s.deny.mcp = v as string[]
-    },
-    unset: (s) => {
-      if (s.deny) delete s.deny.mcp
-    },
+  allowedTools: {
+    key: 'allowedTools',
+    describe: 'Allowed tool rules (comma-separated)',
+    parse: (v) => v.split(',').map((x) => x.trim()).filter(Boolean),
+    get: (s) => s.allowedTools,
+    set: (s, v) => { s.allowedTools = v as string[] },
+    unset: (s) => { delete s.allowedTools },
+  },
+  disallowedTools: {
+    key: 'disallowedTools',
+    describe: 'Disallowed tool rules (comma-separated)',
+    parse: (v) => v.split(',').map((x) => x.trim()).filter(Boolean),
+    get: (s) => s.disallowedTools,
+    set: (s, v) => { s.disallowedTools = v as string[] },
+    unset: (s) => { delete s.disallowedTools },
   },
   'tools.Bash.foregroundMs': {
     key: 'tools.Bash.foregroundMs',

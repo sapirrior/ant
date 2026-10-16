@@ -43,7 +43,7 @@ export function registerRunCommand(program: Command): void {
     .option('--tools <names>', 'Filter tools exposed to the model (e.g. "default" or "ReadFile,EditFile")')
     .option('--allowed-tools <rule>', 'Rule approving tool execution (e.g. "Bash", "Bash(git diff *)")', collectRules, [])
     .option('--disallowed-tools <rule>', 'Rule denying tool execution (e.g. "Bash(rm *)", "WriteFile")', collectRules, [])
-    .option('--permission-mode <mode>', 'Permission mode: default | plan | acceptEdits | dontAsk | bypassPermissions')
+    .option('--permission-mode <mode>', 'Permission mode: default | plan | acceptEdits | bypassPermissions')
     .option('--dangerously-skip-permissions', 'Bypass all tool execution permission checks')
     .option('--bare', 'Suppress ambient ~/.ant/settings.json and project MCP discovery')
     .option('--no-session-persistence', 'Disable session transcripts, message storage, and checkpoints')
@@ -74,10 +74,7 @@ export function registerRunCommand(program: Command): void {
           throw new Error('Cannot specify both --continue and --resume')
         }
 
-        if (!options.print && !options.continue && !options.resume) {
-          if (positionalPrompt) {
-            throw new Error(`ant requires -p/--print to run in print mode. Usage: ant -p "${positionalPrompt}"`)
-          }
+        if (positionalPrompt === undefined && !options.continue && !options.resume && process.stdin.isTTY) {
           program.help()
           return
         }
@@ -128,18 +125,18 @@ export function registerRunCommand(program: Command): void {
 
         // 5. Resolve output format
         const outputFormat = resolveOutputFormat(
-          options.outputFormat ?? options.output,
+          options.outputFormat,
           env.ANT_OUTPUT_FORMAT ?? env.ANT_OUTPUT,
           userSettings.outputFormat ?? userSettings.output,
           Boolean(process.stdout.isTTY)
         )
 
         // 6. Resolve logLevel & verbose
-        const logLevel = (options.logLevel ?? env.ANT_LOG_LEVEL ?? userSettings.logLevel ?? 'info') as LogLevel
+        const verbose = Boolean(options.verbose)
+        let logLevel = (options.logLevel ?? env.ANT_LOG_LEVEL ?? userSettings.logLevel ?? (verbose ? 'debug' : 'info')) as LogLevel
         if (logLevel !== 'error' && logLevel !== 'info' && logLevel !== 'debug') {
           throw new Error(`Invalid log-level: "${logLevel}". Allowed: error, info, debug`)
         }
-        const verbose = Boolean(options.verbose)
 
         // 7. Resolve theme: CLI > env > settings > auto
         const theme = (options.theme ?? env.ANT_THEME ?? userSettings.theme ?? 'auto') as Theme
@@ -148,7 +145,7 @@ export function registerRunCommand(program: Command): void {
         }
 
         // 8. Resolve reasoning effort
-        const rawEffort = options.effort ?? options.reasoning ?? env.ANT_EFFORT ?? env.ANT_REASONING ?? userSettings.reasoning
+        const rawEffort = options.effort ?? env.ANT_EFFORT ?? env.ANT_REASONING ?? userSettings.reasoning
         const effort = rawEffort ? parseReasoning(String(rawEffort)) : undefined
 
         // 9. Resolve permission mode and rules
@@ -157,17 +154,16 @@ export function registerRunCommand(program: Command): void {
           permissionMode = 'bypassPermissions'
         } else if (options.permissionMode) {
           const modeVal = options.permissionMode.trim()
-          if (modeVal === 'auto') {
-            throw new Error('Permission mode "auto" is not supported. Use "default", "plan", "acceptEdits", "dontAsk", or "bypassPermissions".')
+          if (modeVal === 'dontAsk') {
+            throw new Error('Permission mode "dontAsk" is not supported. Use "default", "plan", "acceptEdits", or "bypassPermissions".')
           }
           if (
             modeVal !== 'default' &&
             modeVal !== 'plan' &&
             modeVal !== 'acceptEdits' &&
-            modeVal !== 'dontAsk' &&
             modeVal !== 'bypassPermissions'
           ) {
-            throw new Error(`Invalid permission-mode: "${modeVal}". Allowed: default, plan, acceptEdits, dontAsk, bypassPermissions`)
+            throw new Error(`Invalid permission-mode: "${modeVal}". Allowed: default, plan, acceptEdits, bypassPermissions`)
           }
           permissionMode = modeVal as PermissionMode
         } else if (userSettings.permissionMode) {
@@ -223,29 +219,45 @@ export function registerRunCommand(program: Command): void {
           combinedSystemPrompt = promptParts.join('\n\n')
         }
 
-        const effectivePermissions = resolveEffectivePermissions({
-          mode: permissionMode,
-          allowedRules: allowedToolsRules,
-          disallowedRules: disallowedToolsRules,
-          exposedToolsFilter: toolsFilter,
-        })
-
         let workspaceRoot = process.cwd()
         try {
           workspaceRoot = realpathSync(process.cwd())
         } catch {}
 
-        const stdinInput = await readPipedStdin()
-        if (!prompt && !stdinInput && !options.continue && !options.resume) {
-          throw new Error('No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.')
+        const effectivePermissions = resolveEffectivePermissions({
+          mode: permissionMode,
+          allowedRules: allowedToolsRules,
+          disallowedRules: disallowedToolsRules,
+          exposedToolsFilter: toolsFilter,
+          cwd: workspaceRoot,
+        })
+
+        const runStartTime = Date.now()
+        let stdinInput: string | undefined
+        try {
+          const remainingStdinMs = timeoutMs > 0 ? Math.max(1, timeoutMs - (Date.now() - runStartTime)) : undefined
+          stdinInput = await readPipedStdin(undefined, undefined, undefined, remainingStdinMs)
+        } catch (err: any) {
+          if (err.message?.includes('timed out waiting for piped stdin')) {
+            notice.error('timed out waiting for piped stdin')
+            process.exitCode = 4
+            return
+          }
+          throw err
         }
+
+        if (!prompt && !stdinInput && !options.continue && !options.resume) {
+          throw new Error('No instruction provided. Pass a prompt or pipe input via stdin.')
+        }
+
+        const remainingTimeoutMs = timeoutMs > 0 ? Math.max(1, timeoutMs - (Date.now() - runStartTime)) : 0
 
         const config: Config = {
           prompt,
           stdinInput,
           model,
           maxTurns,
-          timeoutMs,
+          timeoutMs: remainingTimeoutMs,
           retries,
           outputFormat,
           logLevel,

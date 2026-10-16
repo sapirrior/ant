@@ -22,9 +22,11 @@ export function createReadFileTool(context: ToolExecutionContext) {
     execute: async (input) => {
       return executeWithPolicy('ReadFile', input, context, async ({ path, offset, limit }) => {
         const fullPath = resolveWithinRoot(path, context.cwd)
+        const relPath = relToRoot(context.cwd, fullPath)
+        const isExplicit = context.effectivePermissions?.check('ReadFile', relPath)?.isExplicitRule
 
-        if (isSensitivePath(fullPath) && context.effectivePermissions.mode !== 'bypassPermissions') {
-          throw new Error(`Access denied: reading sensitive file "${path}" requires explicit sensitive authorization.`)
+        if (isSensitivePath(fullPath) && context.effectivePermissions.mode !== 'bypassPermissions' && !isExplicit) {
+          throw new Error(`Access denied: reading sensitive file "${path}" requires explicit allow rule or bypass.`)
         }
 
         if (!existsSync(fullPath)) {

@@ -4,7 +4,6 @@ import type { ToolExecutionContext, ToolExecutionResult } from '../../core/types
 import { executeWithPolicy } from '../pipeline.ts'
 import { MCP_TOOL_PROMPT } from './prompt.ts'
 import { McpClientManager } from '../../mcp/manager.ts'
-import { checkMcpToolPolicy } from '../../policy/mcp.ts'
 
 export const mcpInputSchema = z.object({
   action: z.enum(['list_servers', 'list_tools', 'call']).describe('The MCP action to perform'),
@@ -57,24 +56,6 @@ export function createMcpTool(context: ToolExecutionContext) {
 
             if (!input.tool) {
               throw new Error('Missing required parameter "tool" for action "call"')
-            }
-
-            // Authorization policy check: allowed vs explicitly denied vs ask confirmation
-            const verdict = checkMcpToolPolicy(
-              input.server,
-              input.tool,
-              context.allowedMcpPatterns ?? [],
-              context.deniedMcpPatterns ?? []
-            )
-
-            if (verdict.status === 'denied') {
-              throw new Error(`MCP tool execution denied by policy: ${verdict.reason}. Do not attempt to retry.`)
-            }
-
-            if (verdict.status === 'ask') {
-              throw new Error(
-                `Permission denied: MCP tool "${input.server}/${input.tool}" requires explicit approval. Pre-approve with --allowed-tools "McpTool" or --allowed-tools "McpTool(${input.server}/*)".`
-              )
             }
 
             if (signal?.aborted) {
