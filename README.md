@@ -7,8 +7,8 @@
 *Terminal-native. Model-agnostic. Headless by design. Instant time-travel rollback.*
 
 [![Version](https://img.shields.io/badge/version-0.9.0-blue.svg?style=flat-square)](package.json)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Runtime](https://img.shields.io/badge/runtime-Bun%20%7C%20Node-black.svg?style=flat-square)](https://bun.sh)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 
 ```bash
 git diff | ant -p "Review this patch for edge cases and regressions"
