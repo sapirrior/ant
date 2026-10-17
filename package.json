@@ -1,5 +1,5 @@
 {
-  "name": "ant",
+  "name": "ant-actions",
   "version": "0.11.0",
   "description": "The post-modern autonomous print agent",
   "type": "module",
@@ -9,9 +9,16 @@
   },
   "main": "./src/main.ts",
   "bin": {
-    "ant": "./src/main.ts"
+    "ant": "./bin/cli.js",
+    "ant-actions": "./bin/cli.js"
   },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "prepublishOnly": "bun run verify && bun run format",
     "start": "bun --no-env-file run src/main.ts",
     "dev": "bun --no-env-file --watch run src/main.ts",
     "format": "prettier --write .",

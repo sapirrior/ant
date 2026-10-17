@@ -167,12 +167,30 @@ export function registerUpdateCommand(program: Command): void {
           renameSync(tempBin, targetBin)
         }
 
-        // Run termux-fix-shebang if in Termux
-        if (process.env.PREFIX && existsSync(`${process.env.PREFIX}/bin/termux-fix-shebang`)) {
-          spawnSync(`${process.env.PREFIX}/bin/termux-fix-shebang`, [targetBin], {
-            stdio: 'ignore',
-          })
+        // In Termux: ensure ant.js is stored and compile native executable if bun is available
+        const isTermux = Boolean(process.env.PREFIX && existsSync(`${process.env.PREFIX}/bin`))
+        if (isTermux) {
+          const antJsPath = join(installDir, 'ant.js')
+          writeFileSync(antJsPath, buffer)
+          if (existsSync(`${process.env.PREFIX}/bin/termux-fix-shebang`)) {
+            spawnSync(`${process.env.PREFIX}/bin/termux-fix-shebang`, [antJsPath, targetBin], {
+              stdio: 'ignore',
+            })
+          }
+          const hasBun = spawnSync('which', ['bun'], { stdio: 'ignore' }).status === 0
+          if (hasBun) {
+            spawnSync(
+              'bun',
+              ['build', '--compile', '--no-env-file', antJsPath, '--outfile', targetBin],
+              {
+                stdio: 'ignore',
+              },
+            )
+            chmodSync(targetBin, 0o755)
+          }
         }
+
+        writeFileSync(join(installDir, '.version'), latestVersion, 'utf-8')
 
         notice.done(`Successfully updated ant to v${latestVersion}! (${targetBin})`)
         process.exitCode = 0

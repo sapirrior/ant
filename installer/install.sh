@@ -5,10 +5,10 @@ APP="ant"
 REPO="sapirrior/ant"
 
 # ant Brand Color Palette (from src/output/color.ts)
-# Primary: Warm brand orange (#d77757)
-PRIMARY='\033[38;2;215;119;87m'
-# Secondary: Soft blue-purple (#b1b9f9)
-SECONDARY='\033[38;2;177;185;249m'
+# Primary: Clean light blue-purple (#b1b9f9)
+PRIMARY='\033[38;2;177;185;249m'
+# Secondary: Medium soft blue (#93a5ff)
+SECONDARY='\033[38;2;147;165;255m'
 # Accent: Electric violet (#af87ff)
 ACCENT='\033[38;2;175;135;255m'
 # Success: Bright green (#4eba65)
@@ -24,8 +24,8 @@ NC='\033[0m' # Reset
 
 # Fallback for terminals with basic ANSI color support
 if [ "${COLORTERM:-}" != "truecolor" ] && [ "${COLORTERM:-}" != "24bit" ]; then
-    PRIMARY='\033[38;5;173m'
-    SECONDARY='\033[38;5;147m'
+    PRIMARY='\033[38;5;147m'
+    SECONDARY='\033[38;5;111m'
     ACCENT='\033[38;5;141m'
     SUCCESS='\033[38;5;71m'
     ERROR='\033[38;5;204m'
@@ -290,7 +290,7 @@ install_ant() {
 
     chmod 755 "$target_bin"
 
-    # Termux post-install adjustments for JS bundle
+    # Termux post-install adjustments for JS bundle and native compilation
     if [ "$is_termux" = "true" ]; then
         # Ensure shebang uses termux env
         if command -v termux-fix-shebang >/dev/null 2>&1; then
@@ -298,12 +298,25 @@ install_ant() {
         fi
 
         # Check if bun runtime is present
-        if ! command -v bun >/dev/null 2>&1; then
+        if command -v bun >/dev/null 2>&1; then
+            echo -e "${MUTED}Compiling native standalone binary for Termux...${NC}"
+            local ant_js="${INSTALL_DIR}/ant.js"
+            cp "$target_bin" "$ant_js"
+            if bun build --compile --no-env-file "$ant_js" --outfile "${target_bin}.tmp" >/dev/null 2>&1; then
+                mv "${target_bin}.tmp" "$target_bin"
+                chmod 755 "$target_bin"
+                echo -e "${SUCCESS}Compiled native ant binary successfully.${NC}"
+            else
+                rm -f "${target_bin}.tmp"
+            fi
+        else
             echo -e "\n${WARNING}Notice: 'bun' was not found in your PATH.${NC}"
             echo -e "${MUTED}Termux requires Bun to run ant.js. Install it via:${NC}"
             echo -e "  ${WHITE}pkg install bun${NC}\n"
         fi
     fi
+
+    echo "$specific_version" > "${INSTALL_DIR}/.version"
 
     echo -e "${SUCCESS}Successfully installed ant to ${WHITE}${target_bin}${NC}"
 }
