@@ -6,12 +6,12 @@
 
 _Terminal-native. Model-agnostic. Headless by design. Instant time-travel rollback._
 
-[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg?style=flat-square)](package.json)
+[![npm version](https://img.shields.io/npm/v/ant-actions.svg?style=flat-square)](https://www.npmjs.com/package/ant-actions)
 [![Runtime](https://img.shields.io/badge/runtime-Bun%20Only-black.svg?style=flat-square)](https://bun.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 
 ```bash
-git diff | ant "Review this patch for edge cases and regressions"
+git diff | npx ant-actions "Review this patch for edge cases and regressions"
 ```
 
 </div>
@@ -49,7 +49,7 @@ No interactive prompts. No `/dev/tty` blocking. Just pure terminal autonomy.
 
 ### 1. 🖨️ True Print-Native Execution
 
-Feed it a prompt directly (`ant "Fix auth bug"` or `ant -p "Fix auth bug"`), stream results in real time, and let your scripts inspect standard POSIX exit codes (`0` for success, non-zero for failures). `-p/--print` is supported for backward compatibility, but optional—positional prompts run immediately. Perfect for local CLI aliases, git hooks, and unattended CI/CD runners.
+Feed it a prompt directly (`ant "Fix auth bug"` or `npx ant-actions "Fix auth bug"`), stream results in real time, and let your scripts inspect standard POSIX exit codes (`0` for success, non-zero for failures). `-p/--print` is supported for backward compatibility, but optional—positional prompts run immediately. Perfect for local CLI aliases, git hooks, and unattended CI/CD runners.
 
 ### 2. ⏪ Time-Travel Checkpoints (Instant Undo)
 
@@ -87,15 +87,18 @@ Continue a multi-turn conversation thread seamlessly (`ant -p -c "Now write unit
 
 ## 🚀 Quickstart in 30 Seconds
 
-### 1. Install
+### 1. Run or Install
 
 ```bash
-# Instant installer
-curl -fsSL https://raw.githubusercontent.com/sapirrior/ant/main/installer/install.sh | bash
+# Instant one-liner (zero setup)
+npx ant-actions "Explain the design patterns in src/core"
 
-# Or build from source
-git clone https://github.com/sapirrior/ant.git && cd ant
-bun install && bun run build
+# Or install globally via npm
+npm install -g ant-actions
+# => run as `ant "..."` anywhere!
+
+# Or standalone shell installer
+curl -fsSL https://raw.githubusercontent.com/sapirrior/ant/main/installer/install.sh | bash
 ```
 
 ### 2. Configure Your Provider
