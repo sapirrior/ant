@@ -139,10 +139,10 @@ jobs:
           Context:
           $(cat $CONTEXT_FILE)"
 
-          # Run ant using google/gemini-2.5-flash with fallback
+          # Run ant using google/gemini-flash-lite-latest with fallback
           if [ -n "$GEMINI_API_KEY" ]; then
-            echo "Invoking ant with google/gemini-2.5-flash to generate release notes..."
-            if bun run src/main.ts -p "$AI_INPUT" -m "google/gemini-2.5-flash" --output-format text --bare --no-session-persistence > release_notes.md 2>stderr.log; then
+            echo "Invoking ant with google/gemini-flash-lite-latest to generate release notes..."
+            if bun run src/main.ts -p "$AI_INPUT" -m "google/gemini-flash-lite-latest" --output-format text --bare --no-session-persistence > release_notes.md 2>stderr.log; then
               echo "AI release notes generated successfully."
             else
               echo "Warning: ant failed to generate release notes. Check stderr:"
@@ -184,7 +184,5 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm with OIDC
         run: npm publish --provenance --access public
