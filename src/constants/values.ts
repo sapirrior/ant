@@ -16,7 +16,7 @@ export type ToolName = (typeof TOOL_NAMES)[number]
 export const PERMISSION_MODES = ['default', 'plan', 'acceptEdits', 'bypassPermissions'] as const
 export type PermissionMode = (typeof PERMISSION_MODES)[number]
 
-export const OUTPUT_FORMATS = ['text', 'md', 'json', 'stream-json'] as const
+export const OUTPUT_FORMATS = ['text', 'json', 'stream-json'] as const
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number]
 
 export const LOG_LEVELS = ['error', 'info', 'debug'] as const

@@ -15,26 +15,26 @@ export interface ThemeColors {
 }
 
 export const DARK_THEME: ThemeColors = {
-  primary: [215, 119, 87], // Warm brand orange #d77757
-  secondary: [177, 185, 249], // Light blue-purple #b1b9f9
+  primary: [177, 185, 249], // Clean light blue-purple #b1b9f9 (no orange)
+  secondary: [147, 165, 255], // Medium soft blue #93a5ff
   accent: [175, 135, 255], // Electric violet #af87ff
   error: [255, 107, 128], // Bright red #ff6b80
   warning: [255, 193, 7], // Bright amber #ffc107
   success: [78, 186, 101], // Bright green #4eba65
-  info: [147, 165, 255], // Medium blue
+  info: [100, 181, 246], // Soft sky blue #64b5f6
   muted: [153, 153, 153], // Inactive / muted gray
   border: [80, 80, 80], // Subtle border
   text: [255, 255, 255],
 }
 
 export const LIGHT_THEME: ThemeColors = {
-  primary: [215, 119, 87], // Warm brand orange #d77757
-  secondary: [87, 105, 247], // Medium blue
-  accent: [135, 0, 255], // Electric violet
+  primary: [106, 90, 205], // Slate blue-purple #6a5acd (no orange)
+  secondary: [41, 128, 185], // Medium blue #2980b9
+  accent: [135, 0, 255], // Electric violet #8700ff
   error: [171, 43, 63], // Red
   warning: [150, 108, 30], // Amber
   success: [44, 122, 57], // Green
-  info: [87, 105, 247], // Blue
+  info: [30, 144, 255], // Dodger blue #1e90ff
   muted: [102, 102, 102], // Inactive gray
   border: [175, 175, 175], // Subtle gray
   text: [0, 0, 0],
@@ -42,8 +42,8 @@ export const LIGHT_THEME: ThemeColors = {
 
 // Standard 16-color ANSI mapping
 export const ANSI_16_MAP: Record<keyof ThemeColors, number> = {
-  primary: 33, // yellow
-  secondary: 94, // bright blue
+  primary: 95, // bright magenta/purple
+  secondary: 34, // blue
   accent: 35, // magenta
   error: 31, // red
   warning: 93, // bright yellow

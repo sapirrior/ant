@@ -1,14 +1,7 @@
 import type { LogLevel } from '../core/types.ts'
-import {
-  createColorFormatter,
-  formatDuration,
-  formatTokens,
-  getSymbols,
-  type ColorLevel,
-  type ThemeMode,
-} from './color.ts'
+import { createColorFormatter, formatDuration, type ColorLevel, type ThemeMode } from './color.ts'
 import { displayPath } from './paths.ts'
-import { collapseInline, visibleWidth } from '../utils/format.ts'
+import { collapseInline } from '../utils/format.ts'
 
 const LOG_PRIORITY: Record<LogLevel, number> = {
   error: 0,
@@ -326,7 +319,6 @@ interface ActiveCallInfo {
 
 export class StderrLogger {
   private readonly fmt: ReturnType<typeof createColorFormatter>
-  private readonly sym: ReturnType<typeof getSymbols>
   readonly cwd: string
   private readonly activeCalls = new Map<string, ActiveCallInfo>()
 
@@ -337,7 +329,6 @@ export class StderrLogger {
     cwd: string = process.cwd(),
   ) {
     this.fmt = createColorFormatter(colorLevel, theme)
-    this.sym = getSymbols()
     this.cwd = cwd
   }
 
@@ -386,60 +377,23 @@ export class StderrLogger {
     }
   }
 
-  header(options: HeaderOptions): void {
-    if (!this.shouldLog('info')) return
-
-    const providerStr = options.provider ? ` (${options.provider})` : ''
-    const msgCountStr = options.isNew
-      ? ''
-      : options.messageCount !== undefined
-        ? ` · ${options.messageCount} msg`
-        : ''
-    const capsStr = options.allowedCaps.length > 0 ? ` · [${options.allowedCaps.join(',')}]` : ''
-
-    process.stderr.write(
-      `${this.fmt.bold(options.model)}${this.fmt.muted(providerStr)} ${this.fmt.muted('·')} ${this.fmt.accent(options.threadId)}${this.fmt.muted(capsStr)}${this.fmt.muted(msgCountStr)}\n`,
-    )
-
-    if (options.modelMismatchOld) {
-      process.stderr.write(
-        `  ${this.fmt.warning(`note: model changed from ${options.modelMismatchOld}`)}\n`,
-      )
-    }
-
-    if (options.toolsList && this.shouldLog('debug')) {
-      process.stderr.write(`  ${this.fmt.muted(`tools: ${options.toolsList.join(', ')}`)}\n`)
-    }
-    process.stderr.write('\n')
+  header(_options: HeaderOptions): void {
+    // Print agent behavior: silent by default on stderr.
   }
 
   toolStart(name: string, description: string = '', callId?: string): void {
-    if (!this.shouldLog('info')) return
+    if (!this.shouldLog('debug')) return
 
     if (callId) {
-      // If there are already active tool calls, mark existing and new as parallel
-      const isParallel = this.activeCalls.size > 0
-      if (isParallel) {
-        for (const info of this.activeCalls.values()) {
-          info.isParallel = true
-        }
-      }
       this.activeCalls.set(callId, {
         toolName: name,
         target: description,
-        isParallel,
+        isParallel: this.activeCalls.size > 0,
       })
     }
 
-    const cols = this.getStderrCols()
-    // Prefix: symbol + space + name + space
-    const fixedPrefixWidth =
-      visibleWidth(this.sym.tool) + 1 + visibleWidth(name) + (description ? 1 : 0)
-    const maxDescWidth = Math.max(0, cols - fixedPrefixWidth)
-    const collapsedDesc = description ? collapseInline(description, maxDescWidth) : ''
-    const descStr = collapsedDesc ? ` ${this.fmt.muted(collapsedDesc)}` : ''
-
-    process.stderr.write(`${this.fmt.secondary(this.sym.tool)} ${this.fmt.bold(name)}${descStr}\n`)
+    const descStr = description ? ` ${this.fmt.muted(description)}` : ''
+    process.stderr.write(`${this.fmt.bold(name)}${descStr}\n`)
   }
 
   toolEnd(
@@ -449,98 +403,22 @@ export class StderrLogger {
     callId?: string,
     severity?: OutcomeSeverity,
   ): void {
-    if (!this.shouldLog('info')) return
+    if (callId) this.activeCalls.delete(callId)
+    if (!this.shouldLog('debug')) return
 
-    let isParallel = false
-    let toolName = ''
-    let target = ''
-    if (callId && this.activeCalls.has(callId)) {
-      const info = this.activeCalls.get(callId)!
-      isParallel = info.isParallel
-      toolName = info.toolName
-      target = info.target
-      this.activeCalls.delete(callId)
-    }
-
-    const durStr = durationMs !== undefined ? ` · ${formatDuration(durationMs)}` : ''
+    const durStr = durationMs !== undefined ? ` (${formatDuration(durationMs)})` : ''
     const effSeverity = severity ?? (isError ? 'error' : 'success')
-    const mark = effSeverity === 'error' ? this.sym.fail : this.sym.ok
-    const markColored =
-      effSeverity === 'error'
-        ? this.fmt.error(mark)
-        : effSeverity === 'warning'
-          ? this.fmt.warning(mark)
-          : this.fmt.success(mark)
+    const mark = effSeverity === 'error' ? 'fail' : 'ok'
 
-    const cols = this.getStderrCols()
-    const fixedPrefixWidth = 2 + visibleWidth(this.sym.result) + 1 + visibleWidth(mark) + 1 // '  ⎿ ✓ '
-    const durWidth = visibleWidth(durStr)
-
-    let lineBody = ''
-    if (isParallel && toolName) {
-      const disambig = target ? `${toolName} ${target}` : toolName
-      const disambigClean = collapseInline(disambig, 30)
-      const disambigWidth = visibleWidth(disambigClean) + 3 // ' ' + disambig + ' · '
-      const maxSummaryWidth = Math.max(10, cols - fixedPrefixWidth - disambigWidth - durWidth)
-      const boundedSummary = collapseInline(summary, maxSummaryWidth)
-      const summaryColored =
-        effSeverity === 'error'
-          ? this.fmt.error(boundedSummary)
-          : effSeverity === 'warning'
-            ? this.fmt.warning(boundedSummary)
-            : this.fmt.success(boundedSummary)
-      lineBody = ` ${this.fmt.muted(disambigClean)} · ${summaryColored}${this.fmt.muted(durStr)}`
-    } else {
-      const maxSummaryWidth = Math.max(10, cols - fixedPrefixWidth - durWidth)
-      const boundedSummary = collapseInline(summary, maxSummaryWidth)
-      const summaryColored =
-        effSeverity === 'error'
-          ? this.fmt.error(boundedSummary)
-          : effSeverity === 'warning'
-            ? this.fmt.warning(boundedSummary)
-            : this.fmt.success(boundedSummary)
-      lineBody = ` ${summaryColored}${this.fmt.muted(durStr)}`
-    }
-
-    const fixedPrefix = `  ${this.fmt.muted(this.sym.result)} ${markColored}`
-    process.stderr.write(`${fixedPrefix}${lineBody}\n`)
+    process.stderr.write(`  ⎿ ${mark}${durStr}: ${summary}\n`)
   }
 
   clearActiveCalls(): void {
     this.activeCalls.clear()
   }
 
-  footer(options: FooterOptions): void {
-    if (!this.shouldLog('info')) return
-
+  footer(_options: FooterOptions): void {
+    // Print agent behavior: silent on exit unless errors occurred
     this.clearActiveCalls()
-
-    const ok = options.status === 'completed'
-    const statusText = ok ? this.fmt.success('done') : this.fmt.error(options.status)
-    const tokenStr = options.totalTokens ? ` · ${formatTokens(options.totalTokens)} tokens` : ''
-    const durStr = ` · ${formatDuration(options.durationMs)}`
-
-    if (ok) {
-      process.stderr.write(`\n${statusText} · ${options.steps} step(s)${tokenStr}${durStr}\n`)
-    } else {
-      const cols = this.getStderrCols()
-      const fixedWidth =
-        visibleWidth(options.status) +
-        2 +
-        String(options.steps).length +
-        9 +
-        visibleWidth(durStr) +
-        4
-      const maxErrWidth = Math.max(10, cols - fixedWidth)
-      const errReason = options.error ? `: ${collapseInline(options.error, maxErrWidth)}` : ''
-      process.stderr.write(`\n${statusText}${errReason} · ${options.steps} step(s)${durStr}\n`)
-    }
-
-    if (options.threadId && options.threadId !== 'ephemeral') {
-      const checkpointHint = options.hasCheckpoints ? ' · undo: ant checkpoints' : ''
-      process.stderr.write(
-        `${this.fmt.muted('resume:')} ant -r ${this.fmt.accent(options.threadId)}${this.fmt.muted(checkpointHint)}\n`,
-      )
-    }
   }
 }

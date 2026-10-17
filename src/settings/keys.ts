@@ -187,11 +187,11 @@ export const KEYS: Record<string, KeyDefinition> = {
   },
   outputFormat: {
     key: 'outputFormat',
-    describe: 'Output format: text | md | json | stream-json',
+    describe: 'Output format: text | json | stream-json',
     parse: (v) => {
       if (!OUTPUT_FORMATS.includes(v as OutputFormat)) {
         throw new Error(
-          `Setting "outputFormat" must be "text", "md", "json", or "stream-json" (got "${v}")`,
+          `Setting "outputFormat" must be "text", "json", or "stream-json" (got "${v}")`,
         )
       }
       return v
@@ -211,9 +211,7 @@ export const KEYS: Record<string, KeyDefinition> = {
     describe: 'Alias for outputFormat',
     parse: (v) => {
       if (!OUTPUT_FORMATS.includes(v as OutputFormat)) {
-        throw new Error(
-          `Setting "output" must be "text", "md", "json", or "stream-json" (got "${v}")`,
-        )
+        throw new Error(`Setting "output" must be "text", "json", or "stream-json" (got "${v}")`)
       }
       return v
     },

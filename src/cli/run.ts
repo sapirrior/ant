@@ -28,16 +28,15 @@ export function resolveOutputFormat(
   flagOutput?: string,
   envOutput?: string,
   settingsOutput?: string,
-  isStdoutTTY: boolean = Boolean(process.stdout.isTTY),
 ): OutputFormat {
   const chosen = flagOutput ?? envOutput ?? settingsOutput
   if (chosen) {
-    if (chosen !== 'text' && chosen !== 'md' && chosen !== 'json' && chosen !== 'stream-json') {
-      throw new Error(`Invalid output format: "${chosen}". Allowed: text, md, json, stream-json`)
+    if (chosen !== 'text' && chosen !== 'json' && chosen !== 'stream-json') {
+      throw new Error(`Invalid output format: "${chosen}". Allowed: text, json, stream-json`)
     }
     return chosen as OutputFormat
   }
-  return isStdoutTTY ? 'md' : 'text'
+  return 'text'
 }
 
 export function registerRunCommand(program: Command): void {
@@ -74,7 +73,7 @@ export function registerRunCommand(program: Command): void {
     .option('-s, --max-turns <number>', 'Maximum agent interaction turns')
     .option('-t, --timeout <duration>', 'Wall-clock timeout e.g. "30m", "10s"')
     .option('--retries <number>', 'Number of API request retries (0-10)')
-    .option('-o, --output-format <format>', 'Output format: text | md | json | stream-json')
+    .option('-o, --output-format <format>', 'Output format: text | json | stream-json')
     .option('-l, --log-level <level>', 'Log level: error | info | debug')
     .option('--verbose', 'Emit rich diagnostic progress to stderr')
     .option('--theme <theme>', 'Theme: auto | dark | light | ansi')
@@ -172,11 +171,14 @@ export function registerRunCommand(program: Command): void {
           options.outputFormat,
           env.ANT_OUTPUT_FORMAT ?? env.ANT_OUTPUT,
           userSettings.outputFormat ?? userSettings.output,
-          Boolean(process.stdout.isTTY),
         )
 
         // 6. Resolve logLevel & verbose
         const verbose = Boolean(options.verbose)
+        if (outputFormat === 'stream-json' && !verbose) {
+          throw new Error('When using --print, --output-format=stream-json requires --verbose')
+        }
+
         let logLevel = (options.logLevel ??
           env.ANT_LOG_LEVEL ??
           userSettings.logLevel ??

@@ -81,7 +81,6 @@ export class Engine {
 
       // Create OutputSink according to outputFormat
       const isStdoutTTY = Boolean(process.stdout.isTTY)
-      const stdoutColorLevel = detectColorLevel(process.env, isStdoutTTY)
       const sink = createOutputSink({
         format: config.outputFormat,
         isStdoutTTY,
@@ -90,8 +89,6 @@ export class Engine {
         model: config.model,
         effort: config.effort,
         startTime,
-        colorLevel: stdoutColorLevel,
-        theme: config.theme,
       })
       activeSink = sink
 

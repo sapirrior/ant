@@ -1,9 +1,8 @@
 import type { ModelOutcome, OutputFormat, RunEvent } from '../core/types.ts'
-import type { ColorLevel, ThemeMode } from './color.ts'
 import pkg from '../../package.json' with { type: 'json' }
-import { StreamingMarkdownRenderer } from './markdown.ts'
 import { SCHEMA_VERSION } from '../constants/index.ts'
 import { ResultSchema, StreamResultEventSchema, type ResultEnvelope } from './schema.ts'
+import { installStdoutGuard } from './guard.ts'
 
 export interface OutputSinkOptions {
   format: OutputFormat
@@ -13,8 +12,6 @@ export interface OutputSinkOptions {
   model?: string
   effort?: string
   startTime?: number
-  colorLevel?: ColorLevel
-  theme?: ThemeMode
 }
 
 export interface OutputSink {
@@ -209,116 +206,42 @@ export class StreamJsonSink implements OutputSink {
 }
 
 export class TextSink implements OutputSink {
-  private isTTY: boolean
   private atLineStart = true
-  private hasContentSinceBoundary = false
 
-  constructor(isTTY: boolean) {
-    this.isTTY = isTTY
-  }
+  constructor(_isTTY?: boolean) {}
 
   onEvent(event: RunEvent): void {
-    if (this.isTTY && event.type === 'text-delta') {
+    if (event.type === 'text-delta') {
       process.stdout.write(event.delta)
       this.atLineStart = event.delta.endsWith('\n')
-      this.hasContentSinceBoundary = true
     }
   }
 
   ensureLineStart(): void {
-    if (!this.hasContentSinceBoundary) return
-
     if (!this.atLineStart) {
-      process.stdout.write('\n\n')
-    } else {
       process.stdout.write('\n')
-    }
-    this.atLineStart = true
-    this.hasContentSinceBoundary = false
-  }
-
-  finish(outcome: ModelOutcome): void {
-    if (!this.isTTY) {
-      if (outcome.text) {
-        process.stdout.write(outcome.text + (outcome.text.endsWith('\n') ? '' : '\n'))
-      }
-    } else {
-      if (!this.atLineStart) {
-        process.stdout.write('\n')
-        this.atLineStart = true
-      }
+      this.atLineStart = true
     }
   }
-}
 
-export class MarkdownSink implements OutputSink {
-  private isTTY: boolean
-  private renderer: StreamingMarkdownRenderer
-  private atLineStart = true
-  private hasContentSinceBoundary = false
-
-  constructor(isTTY: boolean, colorLevel?: ColorLevel, theme?: ThemeMode) {
-    this.isTTY = isTTY
-    this.renderer = new StreamingMarkdownRenderer({ colorLevel, theme })
-  }
-
-  ensureLineStart(): void {
-    const flushed = this.renderer.flush()
-    if (flushed) {
-      process.stdout.write(flushed)
-      this.atLineStart = flushed.endsWith('\n')
-      this.hasContentSinceBoundary = true
-    }
-
-    if (!this.hasContentSinceBoundary) return
-
+  finish(_outcome: ModelOutcome): void {
     if (!this.atLineStart) {
-      process.stdout.write('\n\n')
-    } else {
       process.stdout.write('\n')
-    }
-    this.atLineStart = true
-    this.hasContentSinceBoundary = false
-  }
-
-  onEvent(event: RunEvent): void {
-    if (this.isTTY && event.type === 'text-delta') {
-      const rendered = this.renderer.append(event.delta)
-      if (rendered) {
-        process.stdout.write(rendered)
-        this.atLineStart = rendered.endsWith('\n')
-        this.hasContentSinceBoundary = true
-      }
-    }
-  }
-
-  finish(outcome: ModelOutcome): void {
-    if (!this.isTTY) {
-      if (outcome.text) {
-        process.stdout.write(outcome.text + (outcome.text.endsWith('\n') ? '' : '\n'))
-      }
-    } else {
-      const flushed = this.renderer.flush()
-      if (flushed) {
-        process.stdout.write(flushed)
-        this.atLineStart = flushed.endsWith('\n')
-      }
-      if (!this.atLineStart) {
-        process.stdout.write('\n')
-        this.atLineStart = true
-      }
+      this.atLineStart = true
     }
   }
 }
 
 export function createOutputSink(options: OutputSinkOptions): OutputSink {
   switch (options.format) {
-    case 'json':
+    case 'json': {
+      installStdoutGuard()
       return new JsonSink(options)
-    case 'stream-json':
+    }
+    case 'stream-json': {
+      installStdoutGuard()
       return new StreamJsonSink(options)
-    case 'md':
-      return new MarkdownSink(options.isStdoutTTY, options.colorLevel, options.theme)
+    }
     case 'text':
     default:
       return new TextSink(options.isStdoutTTY)

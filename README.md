@@ -122,7 +122,7 @@ ant config set model ollama/llama3
 ### 3. Run
 
 ```bash
-# Ask questions directly (rendered Markdown in terminal, plain text in pipes)
+# Ask questions directly (clean streaming text to stdout)
 ant "Explain the design patterns used in src/core"
 
 # Autonomous coding with safe file edits
@@ -204,7 +204,7 @@ ant "List all exported functions in src/tools/index.ts" -o json | jq -r '.result
 ### ⚡ Stream Real-Time NDJSON Events
 
 ```bash
-ant "Build project and inspect compiler output" -o stream-json | grep --line-buffered '"type":"tool-call"'
+ant "Build project and inspect compiler output" --verbose -o stream-json | grep --line-buffered '"type":"tool-call"'
 ```
 
 ### 🔄 Multi-turn Iteration
@@ -252,7 +252,7 @@ Options:
   --disallowed-tools <rule>             Deny tool rule (overrides allow rules)
   --dangerously-skip-permissions        Bypass all tool permission checks
   --tools <names>                       Filter exposed tools (e.g. "default" or "ReadFile,EditFile")
-  -o, --output-format <format>          text | md | json | stream-json
+  -o, --output-format <format>          text | json | stream-json (default: text)
   -m, --model <provider/model-id>       Model override (e.g. google/gemini-2.5-flash)
   -s, --max-turns <number>              Maximum interaction turns before stopping (default: 30)
   -t, --timeout <duration>              Wall-clock timeout e.g. "30m", "10s" (default: 30m)

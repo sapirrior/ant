@@ -140,6 +140,48 @@ describe('CLI subsystem (hardcore race conditions, options precedence, stdout/st
       }
     })
 
+    it('rejects --output-format=stream-json when --verbose is omitted', async () => {
+      stderrBuf = ''
+      process.exitCode = 0
+      const program = createProgram()
+      try {
+        await program.parseAsync([
+          'node',
+          'ant',
+          '-p',
+          'run',
+          '--output-format',
+          'stream-json',
+          '-m',
+          'google/gemini-2.5-flash',
+        ])
+      } catch {}
+
+      expect(process.exitCode).toBe(2)
+      expect(stderrBuf).toContain('--output-format=stream-json requires --verbose')
+    })
+
+    it('rejects deprecated md output format with usage_error exit code 2', async () => {
+      stderrBuf = ''
+      process.exitCode = 0
+      const program = createProgram()
+      try {
+        await program.parseAsync([
+          'node',
+          'ant',
+          '-p',
+          'run',
+          '--output-format',
+          'md',
+          '-m',
+          'google/gemini-2.5-flash',
+        ])
+      } catch {}
+
+      expect(process.exitCode).toBe(2)
+      expect(stderrBuf).toContain('Invalid output format: "md"')
+    })
+
     it('subcommands are dispatched properly rather than treated as user prompts', () => {
       const program = createProgram()
       const commandNames = program.commands.map((c) => c.name())
