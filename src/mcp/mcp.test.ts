@@ -1,9 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   addMcpServer,
+  loadMcpConfigFile,
   removeMcpServer,
   resolveMergedMcpServers,
   setMcpServerEnabled,
@@ -218,5 +219,31 @@ describe('MCP core subsystem (src/mcp)', () => {
     // Calling closeAll or killAll when no clients are open succeeds without error
     await manager.closeAll()
     manager.killAll()
+  })
+
+  it('validates MCP server configurations and gives clear error messages', () => {
+    const invalidConfigPath = join(tempProject, '.ant', 'invalid-mcp.json')
+    mkdirSync(join(tempProject, '.ant'), { recursive: true })
+
+    // Invalid transport
+    writeFileSync(invalidConfigPath, JSON.stringify({ mcpServers: { bad: { transport: 'grpc' } } }))
+    expect(() => loadMcpConfigFile(invalidConfigPath)).toThrow(
+      /transport must be "stdio", "http", or "sse"/,
+    )
+
+    // Stdio missing command
+    writeFileSync(
+      invalidConfigPath,
+      JSON.stringify({ mcpServers: { bad: { transport: 'stdio' } } }),
+    )
+    expect(() => loadMcpConfigFile(invalidConfigPath)).toThrow(
+      /stdio transport requires a "command" string/,
+    )
+
+    // Http missing url
+    writeFileSync(invalidConfigPath, JSON.stringify({ mcpServers: { bad: { transport: 'http' } } }))
+    expect(() => loadMcpConfigFile(invalidConfigPath)).toThrow(
+      /http transport requires a "url" string/,
+    )
   })
 })

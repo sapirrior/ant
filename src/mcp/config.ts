@@ -58,8 +58,78 @@ export function loadMcpConfigFile(filePath: string): McpConfigFile {
   }
 
   const obj = parsed as Record<string, unknown>
-  const mcpServers = (obj.mcpServers ?? {}) as Record<string, McpServerConfig>
-  return { mcpServers }
+  if (obj.mcpServers === undefined) {
+    return { mcpServers: {} }
+  }
+
+  if (
+    typeof obj.mcpServers !== 'object' ||
+    obj.mcpServers === null ||
+    Array.isArray(obj.mcpServers)
+  ) {
+    throw new Error(`MCP config file at ${filePath}: "mcpServers" must be an object.`)
+  }
+
+  const validatedServers: Record<string, McpServerConfig> = {}
+  for (const [name, srv] of Object.entries(obj.mcpServers as Record<string, unknown>)) {
+    validatedServers[name] = validateMcpServerConfig(name, srv, filePath)
+  }
+  return { mcpServers: validatedServers }
+}
+
+export function validateMcpServerConfig(
+  serverName: string,
+  config: unknown,
+  filePath: string,
+): McpServerConfig {
+  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+    throw new Error(
+      `Invalid MCP config for server "${serverName}" in ${filePath}: configuration must be an object.`,
+    )
+  }
+
+  const s = config as Record<string, unknown>
+  const transport = s.transport
+
+  if (transport !== 'stdio' && transport !== 'http' && transport !== 'sse') {
+    throw new Error(
+      `Invalid MCP config for server "${serverName}" in ${filePath}: transport must be "stdio", "http", or "sse".`,
+    )
+  }
+
+  if (transport === 'stdio') {
+    if (typeof s.command !== 'string' || !s.command.trim()) {
+      throw new Error(
+        `Invalid MCP config for server "${serverName}" in ${filePath}: stdio transport requires a "command" string.`,
+      )
+    }
+    if (s.args !== undefined && !Array.isArray(s.args)) {
+      throw new Error(
+        `Invalid MCP config for server "${serverName}" in ${filePath}: "args" must be an array of strings.`,
+      )
+    }
+    return {
+      transport: 'stdio',
+      command: s.command.trim(),
+      args: s.args as string[] | undefined,
+      env: s.env as Record<string, string> | undefined,
+      cwd: typeof s.cwd === 'string' ? s.cwd : undefined,
+      enabled: s.enabled !== false,
+    }
+  }
+
+  if (typeof s.url !== 'string' || !s.url.trim()) {
+    throw new Error(
+      `Invalid MCP config for server "${serverName}" in ${filePath}: ${transport} transport requires a "url" string.`,
+    )
+  }
+
+  return {
+    transport,
+    url: s.url.trim(),
+    headers: s.headers as Record<string, string> | undefined,
+    enabled: s.enabled !== false,
+  }
 }
 
 export function saveMcpConfigFile(filePath: string, config: McpConfigFile): void {
