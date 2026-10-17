@@ -10,21 +10,21 @@
 
 ## Engineering Rules & Invariants
 
-- **Tool Filtering**: `--tools <filter>` controls exposed tools. An empty filter (`--tools ""` / `[]`) must fail closed and expose no tools.
+- **Tool Filtering**: An empty tool filter must fail closed and expose no tools.
 - **Permission Precedence**: Explicit denies are always evaluated before allows or bypass rules.
-- **Supported Permission Modes**: Only `default`, `plan`, `acceptEdits`, and `bypassPermissions`. Reject `auto` and `dontAsk`.
+- **Supported Permission Modes**: Only `default`, `plan`, `acceptEdits`, and `bypassPermissions` are valid modes. Reject all other modes.
 - **Centralized Safety**:
-  - Always use `resolveWithinRoot` in `src/policy/paths.ts` for workspace path containment.
-  - All tool executions must flow through centralized policy (`executeWithPolicy`).
+  - Always enforce workspace path containment.
+  - All tool executions must flow through centralized policy.
   - Do not reimplement custom tool filtering or permission logic.
-- **Stdout vs. Stderr Separation**:
-  - **stdout**: Dedicated strictly to result data in the requested output format (`text`, `md`, `json`, `stream-json`).
-  - **stderr**: Diagnostic summaries, error messages, and tool logs.
+- **Stream Separation**:
+  - stdout is reserved strictly for machine-readable output results.
+  - stderr is reserved for diagnostics, warnings, and tool logs.
 
 ## Verification Checklist
 
 Run after code changes:
 
 1. `bun run typecheck`
-2. Relevant focused tests (e.g. `bun test src/policy/`)
+2. Relevant focused tests
 3. Full test suite: `bun test`

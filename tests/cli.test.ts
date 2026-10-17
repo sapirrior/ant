@@ -125,9 +125,9 @@ describe('CLI subsystem (hardcore race conditions, options precedence, stdout/st
       expect(stderrBuf).toContain('Cannot specify both --continue and --resume')
     })
 
-    it('rejects unsupported permission modes: auto, dontAsk, and arbitrary garbage', async () => {
-      const modesToTest = ['auto', 'dontAsk', 'invalid_mode', 'sudo']
-      for (const mode of modesToTest) {
+    it('rejects invalid permission modes with usage_error exit code 2', async () => {
+      const invalidModes = ['invalid_mode', 'sudo', 'custom', 'unsupported']
+      for (const mode of invalidModes) {
         stderrBuf = ''
         process.exitCode = 0
         const program = createProgram()

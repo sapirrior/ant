@@ -138,6 +138,13 @@ ant "Fix the failing test in agent.test.ts" --permission-mode acceptEdits --allo
 
 In `ant`, tool security is governed by a single, transparent declarative permission system. There are no hidden classifiers or unexpected prompts.
 
+### Tool Filtering vs. Execution Permissions
+
+- **Tool Visibility (`--tools <list>`)**: Controls which tools are exposed in the model's catalogue. Passing an empty filter (`--tools ""` or `[]`) **fails closed**, exposing zero tools to the model.
+- **Execution Rules (`--allowed-tools` / `--disallowed-tools`)**: Govern whether an exposed tool may execute. Explicit denies always take precedence over allows.
+- **Supported Permission Modes**: Only `default`, `plan`, `acceptEdits`, and `bypassPermissions` are valid modes.
+- **Piped Stdin**: Accepts piped input up to 512 KiB (`git diff | ant "Review"`).
+
 ### Evaluation Order (Deterministic)
 
 1. **Disallowed Rules (`--disallowed-tools`)**: If any deny rule matches, the tool is immediately **denied**. Deny rules always win, even over `--dangerously-skip-permissions`.

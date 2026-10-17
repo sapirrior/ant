@@ -20,6 +20,7 @@
     "schemas:check": "bun scripts/schema.ts --check",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "verify": "bun run typecheck && bun run schemas:check && bun test",
     "bundle": "bun build --target=bun src/main.ts --outfile=dist/ant.js && chmod +x dist/ant.js",
     "build": "bun build --compile --no-env-file src/main.ts --outfile=ant",
     "build:linux-x64": "bun build --compile --no-env-file --target=bun-linux-x64 src/main.ts --outfile=dist/ant-linux-x64",
