@@ -5,7 +5,6 @@ import {
   PERMISSION_MODES,
   REASONING_EFFORTS,
   SCHEMA_VERSION,
-  TOOL_NAMES,
 } from '../src/constants/index.ts'
 
 const ROOT = join(import.meta.dir, '..')
@@ -275,6 +274,34 @@ export function buildStreamEventsJsonSchema(): Record<string, unknown> {
   }
 }
 
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== typeof b) return false
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false
+    }
+    return true
+  }
+
+  const objA = a as Record<string, unknown>
+  const objB = b as Record<string, unknown>
+  const keysA = Object.keys(objA)
+  const keysB = Object.keys(objB)
+
+  if (keysA.length !== keysB.length) return false
+  for (const key of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(objB, key)) return false
+    if (!deepEqual(objA[key], objB[key])) return false
+  }
+
+  return true
+}
+
 const targets = [
   { file: 'result.json', data: buildSuccessResultJsonSchema() },
   { file: 'result.error.json', data: buildErrorResultJsonSchema() },
@@ -289,17 +316,19 @@ for (const target of targets) {
   const formatted = JSON.stringify(target.data, null, 2) + '\n'
 
   if (isCheckMode) {
-    let current = ''
     try {
-      current = readFileSync(filePath, 'utf-8')
-    } catch {
+      const current = readFileSync(filePath, 'utf-8')
+      const currentParsed = JSON.parse(current)
+      if (!deepEqual(currentParsed, target.data)) {
+        hasDrift = true
+        console.error(
+          `Schema drift detected in schemas/${target.file}: types, values, structure, or metadata do not match.`,
+        )
+      }
+    } catch (err) {
       hasDrift = true
-      console.error(`Missing schema file: ${target.file}`)
+      console.error(`Missing or malformed schema file: ${target.file} (${String(err)})`)
       continue
-    }
-    if (current !== formatted) {
-      hasDrift = true
-      console.error(`Schema drift detected in schemas/${target.file}`)
     }
   } else {
     writeFileSync(filePath, formatted, 'utf-8')
