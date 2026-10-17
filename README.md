@@ -6,7 +6,7 @@
 
 _Terminal-native. Model-agnostic. Headless by design. Instant time-travel rollback._
 
-[![Version](https://img.shields.io/badge/version-0.10.1-blue.svg?style=flat-square)](package.json)
+[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg?style=flat-square)](package.json)
 [![Runtime](https://img.shields.io/badge/runtime-Bun%20Only-black.svg?style=flat-square)](https://bun.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 
