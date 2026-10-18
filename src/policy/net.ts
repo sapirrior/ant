@@ -33,7 +33,15 @@ export function isPrivateAddress(ip: string): boolean {
   return false
 }
 
-export async function validatePublicHost(hostname: string): Promise<void> {
+export type HostLookupFn = (
+  hostname: string,
+  options: { all: true },
+) => Promise<Array<{ address: string; family: number }>>
+
+export async function validatePublicHost(
+  hostname: string,
+  lookupFn: HostLookupFn = (host, opts) => dns.lookup(host, opts),
+): Promise<string[]> {
   const host = hostname
     .replace(/^\[|\]$/g, '')
     .trim()
@@ -43,7 +51,10 @@ export async function validatePublicHost(hostname: string): Promise<void> {
   }
 
   try {
-    const records = await dns.lookup(host, { all: true })
+    const records = await lookupFn(host, { all: true })
+    if (!records || records.length === 0) {
+      throw new Error(`Failed to resolve host "${hostname}": no addresses found`)
+    }
     for (const record of records) {
       if (isPrivateAddress(record.address)) {
         throw new Error(
@@ -51,6 +62,7 @@ export async function validatePublicHost(hostname: string): Promise<void> {
         )
       }
     }
+    return records.map((record) => record.address)
   } catch (err: any) {
     if (err.message?.includes('prohibited')) throw err
     // If lookup fails, let caller know

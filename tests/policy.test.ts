@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { join } from 'node:path'
 import { resolveWithinRoot } from '../src/policy/paths.ts'
+import { isPrivateAddress, validatePublicHost } from '../src/policy/net.ts'
 import {
   matchToolRule,
   parseToolRule,
@@ -171,6 +172,57 @@ describe('policy subsystem', () => {
         exposedToolsFilter: [],
       })
       expect(perms.exposedTools).toEqual([])
+    })
+  })
+
+  describe('network security and SSRF protection (validatePublicHost)', () => {
+    it('identifies private, loopback, and special IP ranges accurately', () => {
+      expect(isPrivateAddress('127.0.0.1')).toBe(true)
+      expect(isPrivateAddress('10.0.0.1')).toBe(true)
+      expect(isPrivateAddress('172.16.0.1')).toBe(true)
+      expect(isPrivateAddress('192.168.1.1')).toBe(true)
+      expect(isPrivateAddress('169.254.169.254')).toBe(true)
+      expect(isPrivateAddress('::1')).toBe(true)
+      expect(isPrivateAddress('::ffff:127.0.0.1')).toBe(true)
+      expect(isPrivateAddress('fe80::1')).toBe(true)
+      expect(isPrivateAddress('fc00::1')).toBe(true)
+      expect(isPrivateAddress('93.184.216.34')).toBe(false)
+      expect(isPrivateAddress('1.1.1.1')).toBe(false)
+      expect(isPrivateAddress('2606:4700:4700::1111')).toBe(false)
+    })
+
+    it('rejects localhost, private IPs, and brackets immediately', async () => {
+      await expect(validatePublicHost('localhost')).rejects.toThrow(/prohibited/)
+      await expect(validatePublicHost('127.0.0.1')).rejects.toThrow(/prohibited/)
+      await expect(validatePublicHost('[::1]')).rejects.toThrow(/prohibited/)
+      await expect(validatePublicHost('192.168.1.10')).rejects.toThrow(/prohibited/)
+      await expect(validatePublicHost('10.254.0.1')).rejects.toThrow(/prohibited/)
+    })
+
+    it('rejects domains that resolve to private addresses using injected lookup', async () => {
+      const fakeLookup = async () => [{ address: '127.0.0.1', family: 4 }]
+      await expect(validatePublicHost('evil.attacker.com', fakeLookup)).rejects.toThrow(
+        /prohibited/,
+      )
+    })
+
+    it('rejects domains if ANY resolved address is private', async () => {
+      const mixedLookup = async () => [
+        { address: '93.184.216.34', family: 4 },
+        { address: '10.0.0.5', family: 4 },
+      ]
+      await expect(validatePublicHost('mixed.example.com', mixedLookup)).rejects.toThrow(
+        /prohibited/,
+      )
+    })
+
+    it('returns validated public addresses on successful resolution', async () => {
+      const publicLookup = async () => [
+        { address: '93.184.216.34', family: 4 },
+        { address: '93.184.216.35', family: 4 },
+      ]
+      const addrs = await validatePublicHost('example.com', publicLookup)
+      expect(addrs).toEqual(['93.184.216.34', '93.184.216.35'])
     })
   })
 })

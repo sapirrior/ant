@@ -1,9 +1,10 @@
+import { isIP } from 'node:net'
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../../core/types.ts'
 import { executeWithPolicy } from '../pipeline.ts'
 import { WEB_FETCH_DESCRIPTION } from './prompt.ts'
-import { validatePublicHost } from '../../policy/net.ts'
+import { validatePublicHost, type HostLookupFn } from '../../policy/net.ts'
 import { decodeEntities } from '../../utils/html.ts'
 
 export const webFetchInputSchema = z.object({
@@ -165,7 +166,20 @@ export function chunkText(text: string, maxChunkChars = 8000): string[] {
   return chunks.filter(Boolean)
 }
 
-export function createWebFetchTool(context: ToolExecutionContext) {
+export type FetchFn = (
+  input: string | URL | Request,
+  init?: RequestInit & { tls?: { serverName?: string } },
+) => Promise<Response>
+
+export interface WebFetchToolOptions {
+  fetchFn?: FetchFn
+  lookupFn?: HostLookupFn
+}
+
+export function createWebFetchTool(
+  context: ToolExecutionContext,
+  toolOptions?: WebFetchToolOptions,
+) {
   return tool({
     description: WEB_FETCH_DESCRIPTION,
     inputSchema: webFetchInputSchema,
@@ -196,18 +210,38 @@ export function createWebFetchTool(context: ToolExecutionContext) {
               )
             }
 
-            await validatePublicHost(parsedUrl.hostname)
+            const validatedIps = await validatePublicHost(parsedUrl.hostname, toolOptions?.lookupFn)
+            const targetIp = validatedIps[0]
+            if (!targetIp) {
+              throw new Error(`Failed to resolve host "${parsedUrl.hostname}": no addresses found`)
+            }
 
-            const resp = await fetch(currentUrl, {
-              headers: {
-                'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                Accept:
-                  'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
-              },
+            const ipHost = targetIp.includes(':') ? `[${targetIp}]` : targetIp
+            const portPart = parsedUrl.port ? `:${parsedUrl.port}` : ''
+            const pinnedUrl = `${parsedUrl.protocol}//${ipHost}${portPart}${parsedUrl.pathname}${parsedUrl.search}`
+
+            const fetchHeaders: Record<string, string> = {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              Accept:
+                'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+              Host: parsedUrl.host,
+            }
+
+            const fetchOptions: RequestInit & { tls?: { serverName?: string } } = {
+              headers: fetchHeaders,
               redirect: 'manual',
               signal: controller.signal,
-            })
+            }
+
+            if (parsedUrl.protocol === 'https:' && !isIP(parsedUrl.hostname)) {
+              fetchOptions.tls = {
+                serverName: parsedUrl.hostname,
+              }
+            }
+
+            const fetchImpl = toolOptions?.fetchFn ?? fetch
+            const resp = await fetchImpl(pinnedUrl, fetchOptions)
 
             if (resp.status >= 300 && resp.status < 400 && resp.headers.get('location')) {
               currentUrl = new URL(resp.headers.get('location')!, currentUrl).toString()

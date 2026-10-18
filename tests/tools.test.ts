@@ -9,6 +9,7 @@ import { atomicWrite, computeHash, snapshot } from '../src/tools/fs.ts'
 import { createEditFileTool } from '../src/tools/EditFileTool/EditFileTool.ts'
 import { createBashTool } from '../src/tools/BashTool/BashTool.ts'
 import { createMcpTool } from '../src/tools/McpTool/McpTool.ts'
+import { createWebFetchTool, type FetchFn } from '../src/tools/WebFetchTool/WebFetchTool.ts'
 import { TaskManagerRegistry } from '../src/tools/tasks.ts'
 import { resolveEffectivePermissions } from '../src/policy/toolPermissions.ts'
 import type { ToolExecutionContext, ToolExecutionResult } from '../src/core/types.ts'
@@ -254,6 +255,151 @@ describe('tools subsystem (registration, pipeline, fs, bash, tasks, mcp)', () =>
       )
       expect(res.ok).toBe(false)
       expect(res.error).toContain('Permission denied')
+    })
+  })
+
+  describe('WebFetchTool SSRF protection and DNS connection pinning', () => {
+    it('pins connection to vetted public IP address and preserves Host and TLS SNI headers', async () => {
+      const ctx: ToolExecutionContext = {
+        cwd: tempDir,
+        effectivePermissions: resolveEffectivePermissions({
+          mode: 'bypassPermissions',
+          allowedRules: [],
+          disallowedRules: [],
+        }),
+      }
+
+      let capturedUrl = ''
+      let capturedOptions: any = null
+
+      const mockLookup = async (host: string) => {
+        expect(host).toBe('example.com')
+        return [{ address: '93.184.216.34', family: 4 }]
+      }
+
+      const mockFetch: FetchFn = async (url: any, opts: any) => {
+        capturedUrl = String(url)
+        capturedOptions = opts
+        return new Response(
+          '<html><head><title>Test Page</title></head><body><p>Hello World</p></body></html>',
+          {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+          },
+        )
+      }
+
+      const tool = createWebFetchTool(ctx, { lookupFn: mockLookup as any, fetchFn: mockFetch })
+      const res = (await (tool.execute as any)(
+        { url: 'https://example.com/docs/api?q=1' },
+        { messages: [] },
+      )) as ToolExecutionResult<any>
+
+      expect(res.ok).toBe(true)
+      // Must pin directly to vetted IP in URL
+      expect(capturedUrl).toBe('https://93.184.216.34/docs/api?q=1')
+      // Must preserve original Host header
+      expect(capturedOptions?.headers?.Host).toBe('example.com')
+      // Must set TLS serverName for SNI / certificate validation
+      expect(capturedOptions?.tls?.serverName).toBe('example.com')
+      expect(res.output.title).toBe('Test Page')
+      expect(res.output.content).toContain('Hello World')
+    })
+
+    it('blocks DNS rebinding where connection would resolve to private address', async () => {
+      const ctx: ToolExecutionContext = {
+        cwd: tempDir,
+        effectivePermissions: resolveEffectivePermissions({
+          mode: 'bypassPermissions',
+          allowedRules: [],
+          disallowedRules: [],
+        }),
+      }
+
+      const reachedEndpoints: string[] = []
+      const mockLookup = async () => [{ address: '93.184.216.34', family: 4 }]
+
+      const mockFetch: FetchFn = async (url: any) => {
+        reachedEndpoints.push(String(url))
+        return new Response('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } })
+      }
+
+      const tool = createWebFetchTool(ctx, { lookupFn: mockLookup as any, fetchFn: mockFetch })
+      const res = (await (tool.execute as any)(
+        { url: 'http://rebind-attack.com/data' },
+        { messages: [] },
+      )) as ToolExecutionResult<any>
+
+      expect(res.ok).toBe(true)
+      // Assert that connection was pinned to the vetted public address, never accessing private endpoint
+      expect(reachedEndpoints).toEqual(['http://93.184.216.34/data'])
+      expect(reachedEndpoints.some((u) => u.includes('127.0.0.1'))).toBe(false)
+    })
+
+    it('rejects direct localhost and private IP URLs', async () => {
+      const ctx: ToolExecutionContext = {
+        cwd: tempDir,
+        effectivePermissions: resolveEffectivePermissions({
+          mode: 'bypassPermissions',
+          allowedRules: [],
+          disallowedRules: [],
+        }),
+      }
+
+      const tool = createWebFetchTool(ctx)
+      const res1 = (await (tool.execute as any)(
+        { url: 'http://127.0.0.1:8080/secret' },
+        { messages: [] },
+      )) as ToolExecutionResult<any>
+      expect(res1.ok).toBe(false)
+      expect(res1.error).toContain('prohibited')
+
+      const res2 = (await (tool.execute as any)(
+        { url: 'http://localhost:3000' },
+        { messages: [] },
+      )) as ToolExecutionResult<any>
+      expect(res2.ok).toBe(false)
+      expect(res2.error).toContain('prohibited')
+    })
+
+    it('rejects redirects pointing to private network addresses', async () => {
+      const ctx: ToolExecutionContext = {
+        cwd: tempDir,
+        effectivePermissions: resolveEffectivePermissions({
+          mode: 'bypassPermissions',
+          allowedRules: [],
+          disallowedRules: [],
+        }),
+      }
+
+      const reachedUrls: string[] = []
+      const mockLookup = async (host: string) => {
+        if (host === 'public.example.com') {
+          return [{ address: '93.184.216.34', family: 4 }]
+        }
+        return [{ address: '127.0.0.1', family: 4 }]
+      }
+
+      const mockFetch: FetchFn = async (url: any) => {
+        reachedUrls.push(String(url))
+        // Redirect to local private endpoint
+        return new Response('', {
+          status: 302,
+          headers: { Location: 'http://127.0.0.1:9000/admin' },
+        })
+      }
+
+      const tool = createWebFetchTool(ctx, { lookupFn: mockLookup as any, fetchFn: mockFetch })
+      const res = (await (tool.execute as any)(
+        { url: 'http://public.example.com/entry' },
+        { messages: [] },
+      )) as ToolExecutionResult<any>
+
+      expect(res.ok).toBe(false)
+      expect(res.error).toContain('prohibited')
+      // Only the initial public endpoint was contacted; the private endpoint was never touched
+      expect(reachedUrls).toEqual(['http://93.184.216.34/entry'])
+      expect(reachedUrls.some((u) => u.includes('127.0.0.1'))).toBe(false)
     })
   })
 })
