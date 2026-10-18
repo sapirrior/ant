@@ -76,6 +76,13 @@ describe('threads subsystem (database, threadRun, history repair, checkpoints, l
         db.run('UPDATE threads SET lock_pid = 1 WHERE id = ?', [thread.id])
         expect(() => acquireLease(db, thread.id)).toThrow(/is in use by pid/)
 
+        // Even with an artificially stale lock_at (>30s old), active PID prevents lease takeover
+        db.run('UPDATE threads SET lock_pid = 1, lock_at = ? WHERE id = ?', [
+          Date.now() - 60000,
+          thread.id,
+        ])
+        expect(() => acquireLease(db, thread.id)).toThrow(/is in use by pid/)
+
         // Release lease
         releaseLease(db, thread.id)
 
@@ -87,6 +94,37 @@ describe('threads subsystem (database, threadRun, history repair, checkpoints, l
         expect(msgs[0]?.content).toBe('Check the webhook logs')
       } finally {
         db.close()
+      }
+    })
+
+    it('thread lease prevents concurrent ownership while owner PID is alive despite stale heartbeat', () => {
+      const db1 = openDb()
+      const db2 = openDb()
+      try {
+        const thread = createThread(db1, {
+          prompt: 'Exclusive lease ownership test',
+          cwd: tempDir,
+          model: 'google/gemini-2.5-flash',
+        })
+
+        // Mock owner being active PID 1 with an old heartbeat timestamp (>30s ago)
+        db1.run('UPDATE threads SET lock_pid = 1, lock_at = ? WHERE id = ?', [
+          Date.now() - 120_000,
+          thread.id,
+        ])
+
+        // Second acquisition attempt by db2 must fail even though timestamp is stale
+        expect(() => acquireLease(db2, thread.id)).toThrow(/is in use by pid 1/)
+
+        // When recorded PID is confirmed dead (e.g. 9999999), db2 can break lease and acquire
+        db1.run('UPDATE threads SET lock_pid = 9999999, lock_at = ? WHERE id = ?', [
+          Date.now() - 120_000,
+          thread.id,
+        ])
+        expect(() => acquireLease(db2, thread.id)).not.toThrow()
+      } finally {
+        db1.close()
+        db2.close()
       }
     })
 

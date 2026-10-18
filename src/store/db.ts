@@ -136,13 +136,13 @@ export function acquireLease(db: Database, threadId: string): void {
 
     if (row.lock_pid !== null) {
       if (row.lock_pid === process.pid && (row.lock_host === null || row.lock_host === host)) {
+        db.run('UPDATE threads SET lock_at = ? WHERE id = ?', [Date.now(), threadId])
         return
       }
       const isSameHost = row.lock_host === null || row.lock_host === host
       const isDead = isSameHost ? !pidAlive(row.lock_pid) : false
-      const isStale = isSameHost && row.lock_at !== null && Date.now() - row.lock_at > 30_000
 
-      if (!isDead && !isStale) {
+      if (!isDead) {
         const timeStr = row.lock_at ? new Date(row.lock_at).toISOString() : 'unknown time'
         const hostStr = row.lock_host ? ` on ${row.lock_host}` : ''
         throw new Error(
