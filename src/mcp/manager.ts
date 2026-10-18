@@ -63,12 +63,6 @@ export class McpClientManager {
     return this.cachedServers
   }
 
-  /**
-   * Clears server cache so subsequent requests reload from disk.
-   */
-  invalidateCache(): void {
-    this.cachedServers = null
-  }
 
   /**
    * Lazily connects to an MCP server or retrieves the cached client.

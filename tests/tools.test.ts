@@ -233,7 +233,7 @@ describe('tools subsystem (registration, pipeline, fs, bash, tasks, mcp)', () =>
 
       const bashTool = createBashTool(ctx)
       const cmd =
-        'node -e "process.stdout.write(\'BEGIN_MARKER\' + \'A\'.repeat(50000) + \'MIDDLE_MARKER\' + \'B\'.repeat(50000) + \'END_MARKER\')"'
+        "node -e \"process.stdout.write('BEGIN_MARKER' + 'A'.repeat(50000) + 'MIDDLE_MARKER' + 'B'.repeat(50000) + 'END_MARKER')\""
       const result = (await bashTool.execute(
         { command: cmd },
         { toolCallId: 'bash_large', messages: [], context: {} },

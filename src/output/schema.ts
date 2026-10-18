@@ -52,8 +52,6 @@ export const ResultSchema = z.discriminatedUnion('is_error', [
   ErrorResultSchema,
 ])
 
-export type SuccessResultEnvelope = z.infer<typeof SuccessResultSchema>
-export type ErrorResultEnvelope = z.infer<typeof ErrorResultSchema>
 export type ResultEnvelope = z.infer<typeof ResultSchema>
 
 // Stream events (NDJSON)
@@ -126,5 +124,3 @@ export const StreamEventSchema = z.union([
   StreamSuccessResultEventSchema,
   StreamErrorResultEventSchema,
 ])
-
-export type StreamEvent = z.infer<typeof StreamEventSchema>

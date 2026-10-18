@@ -1,5 +1,5 @@
 import type { ModelMessage } from 'ai'
-import type { EffectivePermissions, ParsedToolRule } from '../policy/toolPermissions.ts'
+import type { EffectivePermissions } from '../policy/toolPermissions.ts'
 import type {
   LogLevel,
   OutputFormat,
@@ -27,16 +27,10 @@ export interface Config {
   readonly cwd: string
   readonly continueLatest: boolean
   readonly resumeThreadId?: string
-  readonly streamRetries?: number
   readonly bare?: boolean
   readonly noSessionPersistence?: boolean
   readonly verbose?: boolean
-  readonly toolsFilter?: readonly ToolName[]
-  readonly permissionMode?: PermissionMode
-  readonly allowedToolsRules?: readonly ParsedToolRule[]
-  readonly disallowedToolsRules?: readonly ParsedToolRule[]
   readonly appendSystemPrompt?: string
-  readonly appendSystemPromptFile?: string
   readonly settings?: import('../settings/index.ts').Settings
 }
 

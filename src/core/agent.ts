@@ -226,7 +226,7 @@ export async function runAgent(
       stopWhen: isStepCount(config.maxTurns),
       abortSignal: signal,
       maxRetries: config.retries,
-      streamRetries: config.streamRetries ?? config.settings?.streamRetries ?? 1,
+      streamRetries: config.settings?.streamRetries ?? 1,
       timeout: {
         firstChunkMs: 180000,
         chunkMs: 60000,

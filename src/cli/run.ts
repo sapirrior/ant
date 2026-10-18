@@ -326,10 +326,6 @@ export function registerRunCommand(program: Command): void {
           noSessionPersistence:
             options.sessionPersistence === false || Boolean(options.noSessionPersistence),
           verbose,
-          toolsFilter,
-          permissionMode,
-          allowedToolsRules,
-          disallowedToolsRules,
           appendSystemPrompt: combinedSystemPrompt,
           settings: userSettings,
         }

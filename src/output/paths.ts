@@ -17,12 +17,3 @@ export function displayPath(p: string, opts: { home?: string; cwd?: string } = {
   }
   return p
 }
-
-/** For free-text messages that embed paths (error strings). */
-export function tildifyText(s: string, home = homedir()): string {
-  const h = home.replace(/[\\/]+$/, '')
-  if (!h) return s
-  const esc = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(esc, 'g')
-  return s.replace(regex, '~')
-}
