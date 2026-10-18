@@ -221,6 +221,33 @@ describe('tools subsystem (registration, pipeline, fs, bash, tasks, mcp)', () =>
       expect(result.output.exitCode).toBeGreaterThan(0)
     })
 
+    it('preserves bounded head and rolling tail with omitted count for large output (>100k chars)', async () => {
+      const ctx: ToolExecutionContext = {
+        cwd: tempDir,
+        effectivePermissions: resolveEffectivePermissions({
+          mode: 'bypassPermissions',
+          allowedRules: [],
+          disallowedRules: [],
+        }),
+      }
+
+      const bashTool = createBashTool(ctx)
+      const cmd =
+        'node -e "process.stdout.write(\'BEGIN_MARKER\' + \'A\'.repeat(50000) + \'MIDDLE_MARKER\' + \'B\'.repeat(50000) + \'END_MARKER\')"'
+      const result = (await bashTool.execute(
+        { command: cmd },
+        { toolCallId: 'bash_large', messages: [], context: {} },
+      )) as any
+
+      expect(result.ok).toBe(true)
+      expect(result.output.status).toBe('exited')
+      expect(result.output.truncated).toBe(true)
+      expect(result.output.output).toContain('BEGIN_MARKER')
+      expect(result.output.output).toContain('END_MARKER')
+      expect(result.output.output).not.toContain('MIDDLE_MARKER')
+      expect(result.output.output).toContain('[... 70035 chars omitted ...]')
+    })
+
     it('tracks tasks and supports cursor-based incremental reads in TaskManager', async () => {
       const registry = new TaskManagerRegistry()
       const child = spawn('sh', ['-c', 'echo "line one"; echo "line two"'])

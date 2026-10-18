@@ -114,7 +114,13 @@ export function createBashTool(context: ToolExecutionContext) {
         }
 
         const pid = child.pid!
-        let combinedOutput = ''
+        const HEAD_CAP = 10000
+        const TAIL_CAP = 20000
+        const TOTAL_CAP = 30000
+
+        let headOutput = ''
+        let tailOutput = ''
+        let rawOutput = ''
         let totalChars = 0
         let exitCode: number | null = null
         let exitSignal: string | null = null
@@ -122,24 +128,25 @@ export function createBashTool(context: ToolExecutionContext) {
         const stdoutDecoder = new StringDecoder('utf-8')
         const stderrDecoder = new StringDecoder('utf-8')
 
-        // Cap buffer during collection to prevent unbounded memory growth (B-004)
-        const MAX_BUFFER = 100000
+        const appendChunk = (str: string) => {
+          totalChars += str.length
+          if (rawOutput.length < TOTAL_CAP) {
+            rawOutput += str.slice(0, TOTAL_CAP - rawOutput.length)
+          }
+          if (headOutput.length < HEAD_CAP) {
+            headOutput += str.slice(0, HEAD_CAP - headOutput.length)
+          }
+          tailOutput = (tailOutput + str).slice(-TAIL_CAP)
+        }
+
         const appendStdout = (chunk: Buffer | string) => {
           const str = typeof chunk === 'string' ? chunk : stdoutDecoder.write(chunk)
-          totalChars += str.length
-          combinedOutput += str
-          if (combinedOutput.length > MAX_BUFFER) {
-            combinedOutput = combinedOutput.slice(-MAX_BUFFER)
-          }
+          appendChunk(str)
         }
 
         const appendStderr = (chunk: Buffer | string) => {
           const str = typeof chunk === 'string' ? chunk : stderrDecoder.write(chunk)
-          totalChars += str.length
-          combinedOutput += str
-          if (combinedOutput.length > MAX_BUFFER) {
-            combinedOutput = combinedOutput.slice(-MAX_BUFFER)
-          }
+          appendChunk(str)
         }
 
         child.stdout?.on('data', appendStdout)
@@ -196,7 +203,7 @@ export function createBashTool(context: ToolExecutionContext) {
           if (args.background && backgroundEnabled && context.tasks) {
             child.stdout?.removeListener('data', appendStdout)
             child.stderr?.removeListener('data', appendStderr)
-            const task = context.tasks.createTask(args.command, child, combinedOutput)
+            const task = context.tasks.createTask(args.command, child, '')
             if (hardTimer) {
               task.hardTimer = hardTimer
               hardTimer = null
@@ -204,7 +211,7 @@ export function createBashTool(context: ToolExecutionContext) {
             return {
               status: 'running',
               taskId: task.id,
-              output: combinedOutput.slice(-4000),
+              output: '',
               note: `Started in background as ${task.id}. Use TaskManager to read output, send input, or stop it.`,
             }
           }
@@ -221,7 +228,11 @@ export function createBashTool(context: ToolExecutionContext) {
           ])
 
           if (waitResult.type === 'exit') {
-            const finalOutput = formatOutputChars(combinedOutput, totalChars)
+            const restOut = stdoutDecoder.end()
+            if (restOut) appendChunk(restOut)
+            const restErr = stderrDecoder.end()
+            if (restErr) appendChunk(restErr)
+            const finalOutput = formatOutputChars(headOutput, tailOutput, totalChars, rawOutput)
             let exitCode = waitResult.res.code
             if (exitCode === null) {
               const sig = waitResult.res.signal
@@ -243,7 +254,8 @@ export function createBashTool(context: ToolExecutionContext) {
           if (backgroundEnabled && context.tasks) {
             child.stdout?.removeListener('data', appendStdout)
             child.stderr?.removeListener('data', appendStderr)
-            const task = context.tasks.createTask(args.command, child, combinedOutput)
+            const taskBuf = totalChars <= TOTAL_CAP ? rawOutput : tailOutput
+            const task = context.tasks.createTask(args.command, child, taskBuf)
             if (hardTimer) {
               task.hardTimer = hardTimer
               hardTimer = null
@@ -251,7 +263,7 @@ export function createBashTool(context: ToolExecutionContext) {
             return {
               status: 'running',
               taskId: task.id,
-              output: combinedOutput.slice(-4000),
+              output: taskBuf.slice(-4000),
               note: `Still running after ${(foregroundMs / 1000).toFixed(0)}s; moved to background as ${task.id}. Use TaskManager to read output, send input, or stop it.`,
             }
           }
@@ -266,7 +278,11 @@ export function createBashTool(context: ToolExecutionContext) {
           killTimer.unref()
           await closePromise
           clearTimeout(killTimer)
-          const finalOutput = formatOutputChars(combinedOutput, totalChars)
+          const restOut = stdoutDecoder.end()
+          if (restOut) appendChunk(restOut)
+          const restErr = stderrDecoder.end()
+          if (restErr) appendChunk(restErr)
+          const finalOutput = formatOutputChars(headOutput, tailOutput, totalChars, rawOutput)
           return {
             status: 'timed_out',
             exitCode: exitCode ?? 1,
@@ -285,13 +301,16 @@ export function createBashTool(context: ToolExecutionContext) {
   })
 }
 
-function formatOutputChars(raw: string, totalChars: number): { text: string; truncated: boolean } {
+function formatOutputChars(
+  head: string,
+  tail: string,
+  totalChars: number,
+  original: string,
+): { text: string; truncated: boolean } {
   const MAX_CHARS = 30000
   if (totalChars <= MAX_CHARS) {
-    return { text: raw, truncated: false }
+    return { text: original, truncated: false }
   }
-  const head = raw.slice(0, 10000)
-  const tail = raw.slice(-20000)
   const omitted = totalChars - 30000
   return {
     text: `${head}\n[... ${omitted} chars omitted ...]\n${tail}`,
