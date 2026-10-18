@@ -199,6 +199,28 @@ describe('tools subsystem (registration, pipeline, fs, bash, tasks, mcp)', () =>
       }
     })
 
+    it('treats a bash process killed by signal as failure with non-zero exit code', async () => {
+      const ctx: ToolExecutionContext = {
+        cwd: tempDir,
+        effectivePermissions: resolveEffectivePermissions({
+          mode: 'bypassPermissions',
+          allowedRules: [],
+          disallowedRules: [],
+        }),
+      }
+
+      const bashTool = createBashTool(ctx)
+      const result = (await bashTool.execute(
+        { command: 'kill -TERM $$' },
+        { toolCallId: 'bash_sig', messages: [], context: {} },
+      )) as any
+
+      expect(result.ok).toBe(true)
+      expect(result.output.status).toBe('exited')
+      expect(result.output.signal).toBe('SIGTERM')
+      expect(result.output.exitCode).toBeGreaterThan(0)
+    })
+
     it('tracks tasks and supports cursor-based incremental reads in TaskManager', async () => {
       const registry = new TaskManagerRegistry()
       const child = spawn('sh', ['-c', 'echo "line one"; echo "line two"'])

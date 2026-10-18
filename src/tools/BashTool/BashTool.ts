@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { constants } from 'node:os'
 import { spawn } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { tool } from 'ai'
@@ -221,9 +222,17 @@ export function createBashTool(context: ToolExecutionContext) {
 
           if (waitResult.type === 'exit') {
             const finalOutput = formatOutputChars(combinedOutput, totalChars)
+            let exitCode = waitResult.res.code
+            if (exitCode === null) {
+              const sig = waitResult.res.signal
+              const sigNum = sig
+                ? (constants.signals as Record<string, number> | undefined)?.[sig]
+                : undefined
+              exitCode = typeof sigNum === 'number' ? 128 + sigNum : 1
+            }
             return {
               status: 'exited',
-              exitCode: waitResult.res.code ?? 0,
+              exitCode,
               signal: waitResult.res.signal,
               output: finalOutput.text,
               truncated: finalOutput.truncated,
