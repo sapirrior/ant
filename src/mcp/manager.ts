@@ -63,7 +63,6 @@ export class McpClientManager {
     return this.cachedServers
   }
 
-
   /**
    * Lazily connects to an MCP server or retrieves the cached client.
    */
