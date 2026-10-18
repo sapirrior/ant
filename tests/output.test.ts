@@ -55,6 +55,17 @@ describe('output subsystem (print agent invariants, guard, logger, sinks)', () =
       expect(stderrBuf.join('')).toBe('Loaded plugin: custom-tool\nWarning: cache miss\n')
     })
 
+    it('diverts malformed JSON-shaped objects and arrays to stderr', () => {
+      installStdoutGuard()
+
+      process.stdout.write('{not valid json}\n')
+      process.stdout.write('[1, 2, not_json]\n')
+      process.stdout.write('{"unclosed": "string}\n')
+
+      expect(stdoutBuf.length).toBe(0)
+      expect(stderrBuf.join('')).toBe('{not valid json}\n[1, 2, not_json]\n{"unclosed": "string}\n')
+    })
+
     it('restores original stdout writer cleanly when restoreStdout is called', () => {
       installStdoutGuard()
       restoreStdout()

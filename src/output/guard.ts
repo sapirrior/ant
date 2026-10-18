@@ -27,7 +27,12 @@ export function installStdoutGuard(): void {
       (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
       (trimmed.startsWith('[') && trimmed.endsWith(']'))
     ) {
-      return (originalStdoutWrite as any)(chunk, ...args)
+      try {
+        JSON.parse(trimmed)
+        return (originalStdoutWrite as any)(chunk, ...args)
+      } catch {
+        // Syntactically invalid JSON candidate; divert to stderr
+      }
     }
 
     // Divert stray non-JSON output (banners, console.log) to stderr
