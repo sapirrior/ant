@@ -49,135 +49,158 @@ export class ThreadRun {
   static open(options: ThreadRunOptions): ThreadRun {
     const { config, realCwd, onLog } = options
     const isPersistent = !config.noSessionPersistence
-    const db = isPersistent ? openDb() : null
+    let db: Database | null = null
+    let acquiredLeaseThreadId: string | null = null
 
-    let thread: ThreadRecord
-    let messages: ModelMessage[] = []
-    let isNewThread = true
-    let modelMismatchOld: string | undefined
-
-    const existingThreadId = config.resumeThreadId ?? (config.continueLatest ? 'latest' : undefined)
-
-    const buildUserContent = () => {
-      if (config.prompt && config.stdinInput) {
-        return `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
-      }
-      return config.prompt || config.stdinInput || undefined
-    }
-
-    if (existingThreadId) {
-      if (!db) {
-        throw new Error('Cannot resume thread when persistence is disabled')
-      }
-      const t = getThread(db, existingThreadId, realCwd)
-      if (t.cwd !== realCwd) {
-        throw new Error(`thread belongs to ${t.cwd}; cd there first`)
-      }
-      acquireLease(db, t.id)
-      if (t.model !== config.model) {
-        modelMismatchOld = t.model
-        db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
-          config.model,
-          Date.now(),
-          t.id,
-        ])
-        t.model = config.model
+    try {
+      if (isPersistent) {
+        db = openDb()
       }
 
-      const storedMessages = getMessages(db, t.id)
-      const repaired = repairHistory(storedMessages)
-      if (repaired.repaired.length > 0) {
-        onLog?.(`Session history repaired: ${repaired.repaired.join(', ')}`)
-        const tail = repaired.messages.slice(storedMessages.length)
-        if (tail.length > 0) {
-          appendMessages(db, t.id, tail)
+      let thread: ThreadRecord
+      let messages: ModelMessage[] = []
+      let isNewThread = true
+      let modelMismatchOld: string | undefined
+
+      const existingThreadId =
+        config.resumeThreadId ?? (config.continueLatest ? 'latest' : undefined)
+
+      const buildUserContent = () => {
+        if (config.prompt && config.stdinInput) {
+          return `${config.prompt}\n\n[Piped Input]:\n${config.stdinInput}`
         }
+        return config.prompt || config.stdinInput || undefined
       }
 
-      thread = t
-      messages = [...repaired.messages]
-      isNewThread = false
+      if (existingThreadId) {
+        if (!db) {
+          throw new Error('Cannot resume thread when persistence is disabled')
+        }
+        const t = getThread(db, existingThreadId, realCwd)
+        if (t.cwd !== realCwd) {
+          throw new Error(`thread belongs to ${t.cwd}; cd there first`)
+        }
+        acquireLease(db, t.id)
+        acquiredLeaseThreadId = t.id
+        if (t.model !== config.model) {
+          modelMismatchOld = t.model
+          db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
+            config.model,
+            Date.now(),
+            t.id,
+          ])
+          t.model = config.model
+        }
 
-      const userContent = buildUserContent()
-      if (userContent) {
+        const storedMessages = getMessages(db, t.id)
+        const repaired = repairHistory(storedMessages)
+        if (repaired.repaired.length > 0) {
+          onLog?.(`Session history repaired: ${repaired.repaired.join(', ')}`)
+          const tail = repaired.messages.slice(storedMessages.length)
+          if (tail.length > 0) {
+            appendMessages(db, t.id, tail)
+          }
+        }
+
+        thread = t
+        messages = [...repaired.messages]
+        isNewThread = false
+
+        const userContent = buildUserContent()
+        if (userContent) {
+          const userMessage: ModelMessage = {
+            role: 'user',
+            content: userContent,
+          }
+          appendMessage(db, thread.id, userMessage)
+          messages.push(userMessage)
+        } else {
+          const lastMsg = messages[messages.length - 1]
+          if (!lastMsg || lastMsg.role !== 'user') {
+            const continueMessage: ModelMessage = {
+              role: 'user',
+              content: 'Continue where you left off.',
+            }
+            appendMessage(db, thread.id, continueMessage)
+            messages.push(continueMessage)
+          }
+        }
+      } else {
+        const userContent = buildUserContent()
+        if (!userContent) {
+          throw new Error(
+            'No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.',
+          )
+        }
+
+        if (isPersistent && db) {
+          thread = createThread(db, {
+            prompt: config.prompt,
+            stdinInput: config.stdinInput,
+            cwd: realCwd,
+            model: config.model,
+          })
+          acquireLease(db, thread.id)
+          acquiredLeaseThreadId = thread.id
+        } else {
+          thread = {
+            id: 'ephemeral',
+            title: config.prompt ? config.prompt.slice(0, 50) : 'Ephemeral session',
+            cwd: realCwd,
+            model: config.model,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            turns: 0,
+            messages: 0,
+            steps: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            lockPid: null,
+            lockAt: null,
+          }
+        }
+
         const userMessage: ModelMessage = {
           role: 'user',
           content: userContent,
         }
-        appendMessage(db, thread.id, userMessage)
+        if (db) appendMessage(db, thread.id, userMessage)
         messages.push(userMessage)
-      } else {
-        const lastMsg = messages[messages.length - 1]
-        if (!lastMsg || lastMsg.role !== 'user') {
-          const continueMessage: ModelMessage = {
-            role: 'user',
-            content: 'Continue where you left off.',
-          }
-          appendMessage(db, thread.id, continueMessage)
-          messages.push(continueMessage)
+      }
+
+      const instance = new ThreadRun({
+        db,
+        thread,
+        isNewThread,
+        modelMismatchOld,
+        initialMessages: messages,
+      })
+
+      if (db && thread.id !== 'ephemeral') {
+        const activeDb = db
+        instance.heartbeatTimer = setInterval(() => {
+          try {
+            if (!instance.isClosed) {
+              acquireLease(activeDb, thread.id)
+            }
+          } catch {}
+        }, 5000)
+      }
+
+      return instance
+    } catch (err) {
+      if (db) {
+        if (acquiredLeaseThreadId) {
+          try {
+            releaseLease(db, acquiredLeaseThreadId)
+          } catch {}
         }
-      }
-    } else {
-      const userContent = buildUserContent()
-      if (!userContent) {
-        throw new Error(
-          'No instruction provided. Pass a prompt via -p "..." or pipe input via stdin.',
-        )
-      }
-
-      if (isPersistent && db) {
-        thread = createThread(db, {
-          prompt: config.prompt,
-          stdinInput: config.stdinInput,
-          cwd: realCwd,
-          model: config.model,
-        })
-        acquireLease(db, thread.id)
-      } else {
-        thread = {
-          id: 'ephemeral',
-          title: config.prompt ? config.prompt.slice(0, 50) : 'Ephemeral session',
-          cwd: realCwd,
-          model: config.model,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          turns: 0,
-          messages: 0,
-          steps: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          lockPid: null,
-          lockAt: null,
-        }
-      }
-
-      const userMessage: ModelMessage = {
-        role: 'user',
-        content: userContent,
-      }
-      if (db) appendMessage(db, thread.id, userMessage)
-      messages.push(userMessage)
-    }
-
-    const instance = new ThreadRun({
-      db,
-      thread,
-      isNewThread,
-      modelMismatchOld,
-      initialMessages: messages,
-    })
-
-    if (db && thread.id !== 'ephemeral') {
-      instance.heartbeatTimer = setInterval(() => {
         try {
-          if (!instance.isClosed) {
-            acquireLease(db, thread.id)
-          }
+          db.close()
         } catch {}
-      }, 5000)
+      }
+      throw err
     }
-
-    return instance
   }
 
   recordStep(stepMessages: ModelMessage[], usage?: UsageSummary, stepsIncrement = 1): void {

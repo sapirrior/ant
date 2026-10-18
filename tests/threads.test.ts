@@ -295,5 +295,42 @@ describe('threads subsystem (database, threadRun, history repair, checkpoints, l
       })
       ephemeralRun.close()
     })
+
+    it('releases acquired lease and closes database when setup fails midway', () => {
+      const setupDb = openDb()
+      let threadId = ''
+      try {
+        const thread = createThread(setupDb, {
+          prompt: 'Corrupt history test',
+          cwd: tempDir,
+          model: 'google/gemini-2.5-flash',
+        })
+        threadId = thread.id
+        setupDb.run('INSERT INTO messages (thread_id, seq, json) VALUES (?, 1, "{corrupt json")', [
+          threadId,
+        ])
+      } finally {
+        setupDb.close()
+      }
+
+      expect(() => {
+        ThreadRun.open({
+          config: {
+            ...mockConfig,
+            resumeThreadId: threadId,
+          } as unknown as Config,
+          realCwd: tempDir,
+        })
+      }).toThrow(/is corrupt/)
+
+      // Lease must be free for another process to acquire immediately without waiting for stale timeout
+      const verifyDb = openDb()
+      try {
+        expect(() => acquireLease(verifyDb, threadId)).not.toThrow()
+      } finally {
+        releaseLease(verifyDb, threadId)
+        verifyDb.close()
+      }
+    })
   })
 })
