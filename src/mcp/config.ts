@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { McpConfigFile, McpScope, McpServerConfig, ResolvedMcpServer } from './types.ts'
 
 import { getAntHome } from '../paths.ts'
 import { withFileLock } from '../utils/fileLock.ts'
+import { writeAtomicJsonFile } from '../utils/atomicJson.ts'
 export { getAntHome } from '../paths.ts'
 
 export function getGlobalMcpConfigPath(): string {
@@ -133,12 +134,7 @@ export function validateMcpServerConfig(
 }
 
 export function saveMcpConfigFile(filePath: string, config: McpConfigFile): void {
-  const dir = dirname(filePath)
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-
-  const tmpPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
-  writeFileSync(tmpPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
-  renameSync(tmpPath, filePath)
+  writeAtomicJsonFile(filePath, config)
 }
 
 export function resolveMergedMcpServers(

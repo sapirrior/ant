@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { notice } from '../output/notice.ts'
 import { getAntHome } from '../paths.ts'
+import { writeAtomicJsonFile } from '../utils/atomicJson.ts'
 import { DEFAULT_SETTINGS, settingsSchema, type Settings } from './schema.ts'
 import { KNOWN_TOP_KEYS } from './keys.ts'
 
@@ -125,18 +126,5 @@ export function loadSettings(options?: LoadSettingsOptions): Settings {
 }
 
 export function saveSettings(settings: Settings): void {
-  const path = getSettingsPath()
-  const dir = dirname(path)
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-
-  const tmpPath = `${path}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
-  try {
-    writeFileSync(tmpPath, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 })
-    renameSync(tmpPath, path)
-  } catch (err) {
-    try {
-      if (existsSync(tmpPath)) unlinkSync(tmpPath)
-    } catch {}
-    throw err
-  }
+  writeAtomicJsonFile(getSettingsPath(), settings)
 }

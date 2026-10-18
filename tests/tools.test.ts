@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -12,6 +12,8 @@ import { createMcpTool } from '../src/tools/McpTool/McpTool.ts'
 import { createWebFetchTool, type FetchFn } from '../src/tools/WebFetchTool/WebFetchTool.ts'
 import { TaskManagerRegistry } from '../src/tools/tasks.ts'
 import { resolveEffectivePermissions } from '../src/policy/toolPermissions.ts'
+import { writeAtomicJsonFile } from '../src/utils/atomicJson.ts'
+import { saveMcpConfigFile } from '../src/mcp/config.ts'
 import type { ToolExecutionContext, ToolExecutionResult } from '../src/core/types.ts'
 
 describe('tools subsystem (registration, pipeline, fs, bash, tasks, mcp)', () => {
@@ -164,6 +166,20 @@ describe('tools subsystem (registration, pipeline, fs, bash, tasks, mcp)', () =>
 
       expect(res.ok).toBe(false)
       expect(res.error).toMatch(/identical/)
+    })
+
+    it('writes JSON atomically and cleans up temporary files on failure', () => {
+      const dest = join(tempDir, 'subfolder', 'test.json')
+      writeAtomicJsonFile(dest, { hello: 'world' })
+      expect(readFileSync(dest, 'utf-8')).toBe('{\n  "hello": "world"\n}\n')
+
+      const mcpDest = join(tempDir, 'mcp', 'config.json')
+      const circular: any = {}
+      circular.self = circular
+
+      expect(() => saveMcpConfigFile(mcpDest, circular as any)).toThrow()
+      const files = readdirSync(join(tempDir, 'mcp'))
+      expect(files.filter((f) => f.includes('.tmp.'))).toHaveLength(0)
     })
   })
 
