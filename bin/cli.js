@@ -20,6 +20,21 @@ function getAntHome() {
   return process.env.ANT_HOME || path.join(os.homedir(), '.ant')
 }
 
+export function handleSpawnResult(res) {
+  if (res.error) {
+    process.stderr.write(`error: Failed to execute ant: ${res.error.message}\n`)
+    return 1
+  }
+  if (typeof res.status === 'number') {
+    return res.status
+  }
+  if (res.signal) {
+    const sigNum = os.constants?.signals?.[res.signal]
+    return typeof sigNum === 'number' ? 128 + sigNum : 1
+  }
+  return 1
+}
+
 function resolveAsset() {
   const platform = process.platform
   const arch = process.arch
@@ -93,7 +108,7 @@ async function main() {
 
   if (isCurrentVersion) {
     const res = spawnSync(targetExe, args, { stdio: 'inherit' })
-    process.exit(res.status ?? 0)
+    process.exit(handleSpawnResult(res))
   }
 
   if (isTermux) {
@@ -145,7 +160,7 @@ async function main() {
 
     // Execute immediately via bun for this invocation
     const runRes = spawnSync('bun', [jsRuntime, ...args], { stdio: 'inherit' })
-    process.exit(runRes.status ?? 0)
+    process.exit(handleSpawnResult(runRes))
   }
 
   // Desktop platforms (Linux, macOS, Windows)
@@ -166,14 +181,21 @@ async function main() {
     fs.writeFileSync(versionFile, pkg.version, 'utf-8')
 
     const res = spawnSync(targetExe, args, { stdio: 'inherit' })
-    process.exit(res.status ?? 0)
+    process.exit(handleSpawnResult(res))
   } catch (err) {
     process.stderr.write(`error: Failed to launch native ant binary: ${err.message}\n`)
     process.exit(1)
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`error: ${err.message}\n`)
-  process.exit(1)
-})
+const isDirectRun =
+  typeof import.meta.main === 'boolean'
+    ? import.meta.main
+    : Boolean(process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+
+if (isDirectRun) {
+  main().catch((err) => {
+    process.stderr.write(`error: ${err.message}\n`)
+    process.exit(1)
+  })
+}
